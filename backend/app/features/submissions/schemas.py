@@ -24,4 +24,4 @@ class SubmissionOut(BaseModel):
 
 
 class CorrectionRequest(BaseModel):
-    text: str  # already-transcribed speech for the single field being corrected
+    text: str  # free-form spoken correction; which field it refers to is detected server-side

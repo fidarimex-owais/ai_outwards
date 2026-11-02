@@ -28,11 +28,10 @@ def confirm_session(
     return service.confirm(session_id)
 
 
-@router.patch("/{session_id}/fields/{field_key}", response_model=TurnResponse)
+@router.patch("/{session_id}/correct", response_model=TurnResponse)
 def correct_field(
     session_id: str,
-    field_key: str,
     body: CorrectionRequest,
     service: SubmissionService = Depends(get_submission_service),
 ) -> TurnResponse:
-    return service.correct_field(session_id, field_key, body.text)
+    return service.correct_field(session_id, body.text)

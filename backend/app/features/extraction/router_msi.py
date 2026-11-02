@@ -3,12 +3,14 @@ import re
 
 from app.features.extraction.prompts import (
     BATCH_EXTRACTION_SYSTEM_PROMPT,
+    CORRECTION_SYSTEM_PROMPT,
     EXTRACTION_SYSTEM_PROMPT,
     build_batch_extraction_prompt,
+    build_correction_prompt,
     build_extraction_prompt,
 )
 from app.features.extraction.rules import extract_number, extract_text, extract_time, extract_vehicle_number
-from app.features.extraction.schemas import ExtractedField, FieldType
+from app.features.extraction.schemas import ExtractedCorrection, ExtractedField, FieldType
 from app.features.llm.chain import LLMChain
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
@@ -88,6 +90,35 @@ def extract_batch(
             ambiguous=bool(entry.get("ambiguous", False)),
         )
     return results
+
+
+def extract_correction(
+    fields: list[tuple[str, str, FieldType, object]],
+    raw_text: str,
+    llm_chain: LLMChain,
+    session_id: str,
+) -> ExtractedCorrection:
+    """Identifies which single field a free-form spoken correction refers to, and its new
+    value - e.g. "Correct the labor name to Sagar Panidrahi" or "change Sagar to Sagar
+    Panidrahi" (matching the current value instead of naming the field). Always goes through
+    the LLM: picking the right field out of a sentence that names it in the speaker's own
+    words, not a machine key, needs real language understanding."""
+    prompt = build_correction_prompt(
+        [(key, label, ftype.value, current) for key, label, ftype, current in fields], raw_text
+    )
+    raw_response = llm_chain.generate(prompt, system=CORRECTION_SYSTEM_PROMPT, session_id=session_id)
+    parsed = _parse_json_response(raw_response)
+    if parsed is None:
+        return ExtractedCorrection(field_key=None, value=None, ambiguous=True)
+
+    field_key = parsed.get("field_key")
+    valid_keys = {key for key, _label, _ftype, _current in fields}
+    if field_key not in valid_keys:
+        return ExtractedCorrection(field_key=None, value=None, ambiguous=True)
+
+    return ExtractedCorrection(
+        field_key=field_key, value=parsed.get("value"), ambiguous=bool(parsed.get("ambiguous", False))
+    )
 
 
 def _parse_json_response(raw_response: str) -> dict | None:

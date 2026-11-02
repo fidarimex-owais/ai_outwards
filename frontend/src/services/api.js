@@ -65,8 +65,8 @@ export function submitBatchAnswer(token, sessionId, text) {
   return request(`/sessions/${sessionId}/answer-batch`, { method: "POST", token, json: { text } });
 }
 
-export function correctField(token, sessionId, fieldKey, text) {
-  return request(`/sessions/${sessionId}/fields/${fieldKey}`, { method: "PATCH", token, json: { text } });
+export function correctField(token, sessionId, text) {
+  return request(`/sessions/${sessionId}/correct`, { method: "PATCH", token, json: { text } });
 }
 
 export function confirmSession(token, sessionId) {

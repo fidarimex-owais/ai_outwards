@@ -4,8 +4,14 @@ from app.features.submissions.repository import get_submission, insert_submissio
 from tests.test_conversation_flow import BATCH1, BATCH2, BATCH3, TIME_RESPONSES, _answer
 
 
-def _complete_conversation(client, fake_llm):
-    fake_llm(TIME_RESPONSES)
+CORRECTION_RESPONSES = {
+    "Suresh Patil": '{"field_key": "labor_name", "value": "Suresh Patil", "ambiguous": false}',
+    "not a plate": '{"field_key": "vehicle_number", "value": "not a plate", "ambiguous": false}',
+}
+
+
+def _complete_conversation(client, fake_llm, extra_responses=None):
+    fake_llm(TIME_RESPONSES | (extra_responses or {}))
     session_id = client.post("/sessions").json()["session_id"]
     for batch in (BATCH1, BATCH2, BATCH3):
         for key, text in batch.items():
@@ -15,30 +21,30 @@ def _complete_conversation(client, fake_llm):
 
 
 def test_correction_before_confirm_updates_summary(client, fake_llm, created_sessions):
-    session_id = _complete_conversation(client, fake_llm)
+    session_id = _complete_conversation(client, fake_llm, CORRECTION_RESPONSES)
     created_sessions.append(session_id)
 
-    r = client.patch(f"/sessions/{session_id}/fields/labor_name", json={"text": "Suresh Patil"})
+    r = client.patch(f"/sessions/{session_id}/correct", json={"text": "Correct the labor name to Suresh Patil"})
     data = r.json()
     assert data["state"] == "AWAITING_CONFIRMATION"
     assert "Suresh Patil" in data["summary"]
 
 
 def test_correction_with_invalid_value_asks_clarification(client, fake_llm, created_sessions):
-    session_id = _complete_conversation(client, fake_llm)
+    session_id = _complete_conversation(client, fake_llm, CORRECTION_RESPONSES)
     created_sessions.append(session_id)
 
-    r = client.patch(f"/sessions/{session_id}/fields/vehicle_number", json={"text": "not a plate"})
+    r = client.patch(f"/sessions/{session_id}/correct", json={"text": "The vehicle number should be not a plate"})
     data = r.json()
     assert data["clarification_prompt"] is not None
     assert data["state"] == "AWAITING_CONFIRMATION"
 
 
 def test_confirm_saves_to_mongo_and_completes_session(client, fake_llm, created_sessions):
-    session_id = _complete_conversation(client, fake_llm)
+    session_id = _complete_conversation(client, fake_llm, CORRECTION_RESPONSES)
     created_sessions.append(session_id)
 
-    client.patch(f"/sessions/{session_id}/fields/labor_name", json={"text": "Suresh Patil"})
+    client.patch(f"/sessions/{session_id}/correct", json={"text": "Correct the labor name to Suresh Patil"})
 
     r = client.post(f"/sessions/{session_id}/confirm")
     assert r.status_code == 200
@@ -66,7 +72,7 @@ def test_cannot_reconfirm_or_correct_after_completion(client, fake_llm, created_
     r = client.post(f"/sessions/{session_id}/confirm")
     assert r.status_code == 409
 
-    r = client.patch(f"/sessions/{session_id}/fields/labor_name", json={"text": "Someone Else"})
+    r = client.patch(f"/sessions/{session_id}/correct", json={"text": "Someone Else"})
     assert r.status_code == 409
 
     db = get_db()

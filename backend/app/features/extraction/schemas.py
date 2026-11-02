@@ -14,3 +14,10 @@ class ExtractedField:
     value: str | int | None
     source: str          # "rule" | "llm"
     ambiguous: bool = False
+
+
+@dataclass
+class ExtractedCorrection:
+    field_key: str | None  # which field the speaker meant to change, or None if unclear
+    value: str | int | None
+    ambiguous: bool = False

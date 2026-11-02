@@ -166,12 +166,12 @@ export default function ChatPage({ token, username, onLogout }) {
     }
   }
 
-  async function handleCorrect(fieldKey, text) {
+  async function handleCorrect(text) {
     setError("");
     addMessage("user", text);
     setBusy(true);
     try {
-      const t = await correctField(token, sessionIdRef.current, fieldKey, text);
+      const t = await correctField(token, sessionIdRef.current, text);
       applyTurn(t);
     } catch (err) {
       setError(err.message);

@@ -3,12 +3,12 @@ from datetime import datetime, timezone
 import redis
 from pymongo.database import Database
 
-from app.features.conversation.fields import get_field
+from app.features.conversation.fields import FIELD_DEFINITIONS, get_field
 from app.features.conversation.repository import load_session, save_session
 from app.features.conversation.schemas import TurnResponse
 from app.features.conversation.state_machine import transition
 from app.features.conversation.states import SessionState
-from app.features.extraction.router_msi import extract_field
+from app.features.extraction.router_msi import extract_correction
 from app.features.extraction.schemas import FieldType
 from app.features.guardrails.input_guard import check_input
 from app.features.llm.chain import LLMChain
@@ -71,7 +71,12 @@ class SubmissionService:
 
         return SubmissionOut(**submission)
 
-    def correct_field(self, session_id: str, field_key: str, raw_text: str) -> TurnResponse:
+    def correct_field(self, session_id: str, raw_text: str) -> TurnResponse:
+        """Takes one free-form spoken correction (e.g. "Correct the labor name to Sagar
+        Panidrahi", or just "change Sagar to Sagar Panidrahi") and figures out which field it
+        refers to - the speaker names the field or its current value in their own words, never
+        a machine key, so which field is being corrected is itself something to extract, not
+        something the caller already knows."""
         session = load_session(self._redis, session_id)
         current_state = SessionState(session["state"])
 
@@ -79,35 +84,46 @@ class SubmissionService:
         # rejects corrections attempted from any other state (e.g. after SAVING/COMPLETED).
         session["state"] = transition(current_state, "correct").value
 
-        field_def = get_field(field_key)
-
-        if not raw_text.strip() and not field_def.required:
-            session["answers"][field_key] = ""
-            save_session(self._redis, session)
-            return self._summary_response(session)
-
         guard = check_input(raw_text)
         if not guard.allowed:
             save_session(self._redis, session)
             return TurnResponse(
                 session_id=session_id, state=session["state"],
-                clarification_prompt=f"Sorry, I didn't catch that. {field_def.question}",
+                clarification_prompt="Sorry, I didn't catch that. Which field would you like to correct, and to what?",
             )
 
+        fields = [
+            (f.key, f.label, f.field_type, session["answers"].get(f.key))
+            for f in FIELD_DEFINITIONS
+        ]
         # Note: unlike conversation/service.py's submit_answer, AllLLMsFailed is NOT caught
         # here - AWAITING_CONFIRMATION has no llm_failure transition (only COLLECTING and
         # CLARIFICATION pause on LLM failure). It propagates to the 503 error handler and the
         # session simply stays in AWAITING_CONFIRMATION, ready to retry the correction.
-        extracted = extract_field(field_def.field_type, field_def.label, raw_text, self._llm_chain, session_id)
+        correction = extract_correction(fields, raw_text, self._llm_chain, session_id)
 
-        if extracted.ambiguous or extracted.value is None:
+        if correction.field_key is None:
             save_session(self._redis, session)
             return TurnResponse(
                 session_id=session_id, state=session["state"],
-                clarification_prompt=f"I couldn't understand that clearly. {field_def.question}",
+                clarification_prompt="I couldn't tell which field you meant. Please say which field to correct and its new value.",
             )
 
-        validation = _validate_value(field_def, extracted.value)
+        field_def = get_field(correction.field_key)
+
+        if correction.value in (None, "") and not field_def.required:
+            session["answers"][field_def.key] = ""
+            save_session(self._redis, session)
+            return self._summary_response(session)
+
+        if correction.ambiguous or correction.value is None:
+            save_session(self._redis, session)
+            return TurnResponse(
+                session_id=session_id, state=session["state"],
+                clarification_prompt=f"I couldn't understand the new value clearly. {field_def.question}",
+            )
+
+        validation = _validate_value(field_def, correction.value)
         if not validation.valid:
             save_session(self._redis, session)
             return TurnResponse(
@@ -115,7 +131,7 @@ class SubmissionService:
                 clarification_prompt=f"{validation.error}. {field_def.question}",
             )
 
-        session["answers"][field_key] = validation.value
+        session["answers"][field_def.key] = validation.value
         save_session(self._redis, session)
         return self._summary_response(session)
 

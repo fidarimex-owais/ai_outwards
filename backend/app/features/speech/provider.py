@@ -2,9 +2,22 @@ import math
 import os
 import tempfile
 
+import httpx
 from faster_whisper import WhisperModel
 
+from app.core.config import settings
 from app.features.speech.base import STTClient, STTResult
+
+GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+
+# Biases the model toward this job's vocabulary (quantity buckets, domain terms) so it's
+# less likely to mishear e.g. "six-hand" as "five hand" or "labor" as "ribbon".
+DOMAIN_PROMPT = (
+    "Company name, vehicle number, brand, line mark, weight in kilograms. "
+    "Four-hand quantity, five-hand quantity, six-hand quantity, eight-hand quantity, "
+    "cluster quantity. Remarks, labor name, vehicle out time, vehicle in time, "
+    "vehicle for storage, vehicle receiver."
+)
 
 
 class LocalWhisperSTTClient(STTClient):
@@ -71,13 +84,56 @@ class LocalWhisperSTTClient(STTClient):
         return max(0.0, min(1.0, sum(probs) / len(probs)))
 
 
+class GroqSTTClient(STTClient):
+    """STT provider backed by Groq's hosted whisper-large-v3-turbo. Same model family OpenAI's
+    API uses, but Groq serves it at much lower latency and (at time of writing) a generous free
+    tier - no local model download, no CPU inference cost, and noticeably fewer mishears than
+    the local 'base' model since large-v3 has far more parameters."""
+
+    def __init__(self, api_key: str | None = None, model: str = "whisper-large-v3-turbo"):
+        self._api_key = api_key or settings.stt_api_key or settings.backup_llm_api_key
+        self._model = model
+
+    def transcribe(self, audio_bytes: bytes, audio_format: str = "wav") -> STTResult:
+        response = httpx.post(
+            GROQ_TRANSCRIPTION_URL,
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            files={"file": (f"audio.{audio_format}", audio_bytes, f"audio/{audio_format}")},
+            data={
+                "model": self._model,
+                "language": "en",
+                "prompt": DOMAIN_PROMPT,
+                "response_format": "verbose_json",
+            },
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        text = data.get("text", "").strip()
+        confidence = self._estimate_confidence(data.get("segments", []))
+        return STTResult(text=text, confidence=confidence)
+
+    @staticmethod
+    def _estimate_confidence(segments: list) -> float:
+        """Groq's verbose_json segments carry avg_logprob just like faster-whisper's, so the
+        same log-probability -> probability approximation applies here."""
+        probs = [math.exp(seg["avg_logprob"]) for seg in segments if seg.get("avg_logprob") is not None]
+        if not probs:
+            return 1.0
+        return max(0.0, min(1.0, sum(probs) / len(probs)))
+
+
 _default_client: STTClient | None = None
 
 
 def get_stt_client() -> STTClient:
-    """FastAPI dependency: a single shared client so the (lazily-loaded) model is only
-    loaded once per process, not once per request."""
+    """FastAPI dependency: a single shared client so the (lazily-loaded) local model is only
+    loaded once per process, not once per request. Provider is picked by STT_PROVIDER."""
     global _default_client
     if _default_client is None:
-        _default_client = LocalWhisperSTTClient()
+        if settings.stt_provider == "groq":
+            _default_client = GroqSTTClient()
+        else:
+            _default_client = LocalWhisperSTTClient()
     return _default_client
