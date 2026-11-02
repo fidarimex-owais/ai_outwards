@@ -1,0 +1,5 @@
+.waveform-canvas {
+  flex: 1;
+  height: 36px;
+  min-width: 0;
+}
