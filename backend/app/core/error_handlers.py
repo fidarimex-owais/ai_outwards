@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.exceptions import (
     AllLLMsFailed,
+    ExtractionParseFailed,
     InvalidCredentials,
     InvalidTransition,
     SessionExpired,
@@ -34,5 +35,18 @@ def register_error_handlers(app: FastAPI) -> None:
             content={
                 "error": "all_llms_failed",
                 "detail": "We saved your progress. Please try again shortly.",
+            },
+        )
+
+    # Safety net only - every call site that can raise this catches it in-band (see
+    # conversation/service.py and submissions/service.py) to ask the user to retry without
+    # losing their progress. This 503 only fires if some future call site forgets to.
+    @app.exception_handler(ExtractionParseFailed)
+    async def _extraction_parse_failed(request: Request, exc: ExtractionParseFailed) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "extraction_parse_failed",
+                "detail": "We had trouble processing that. Please try again.",
             },
         )

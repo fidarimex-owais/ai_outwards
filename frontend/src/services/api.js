@@ -43,8 +43,8 @@ export async function login(username, password) {
   return data.access_token;
 }
 
-export function createSession(token) {
-  return request("/sessions", { method: "POST", token });
+export function createSession(token, language = "en") {
+  return request("/sessions", { method: "POST", token, json: { language } });
 }
 
 export function getSession(token, sessionId) {
@@ -73,10 +73,11 @@ export function confirmSession(token, sessionId) {
   return request(`/sessions/${sessionId}/confirm`, { method: "POST", token });
 }
 
-export async function transcribeAudio(token, blob) {
+export async function transcribeAudio(token, blob, language = "en") {
   const form = new FormData();
   const ext = (blob.type.split("/")[1] || "webm").split(";")[0];
   form.append("audio", blob, `recording.${ext}`);
+  form.append("language", language);
   return request("/speech/transcribe", { method: "POST", token, formData: form });
 }
 

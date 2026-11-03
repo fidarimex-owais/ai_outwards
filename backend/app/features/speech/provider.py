@@ -6,18 +6,18 @@ import httpx
 from faster_whisper import WhisperModel
 
 from app.core.config import settings
+from app.features.i18n.translations import FIELD_TEXT, SUPPORTED_LANGUAGES, normalize_language
 from app.features.speech.base import STTClient, STTResult
 
 GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
-# Biases the model toward this job's vocabulary (quantity buckets, domain terms) so it's
-# less likely to mishear e.g. "six-hand" as "five hand" or "labor" as "ribbon".
-DOMAIN_PROMPT = (
-    "Company name, vehicle number, brand, line mark, weight in kilograms. "
-    "Four-hand quantity, five-hand quantity, six-hand quantity, eight-hand quantity, "
-    "cluster quantity. Remarks, labor name, vehicle out time, vehicle in time, "
-    "vehicle for storage, vehicle receiver."
-)
+# Biases the model toward this job's vocabulary (quantity buckets, domain terms) so it's less
+# likely to mishear e.g. "six-hand" as "five hand" or "labor" as "ribbon" - one per supported
+# language, built from the same field labels the conversation itself uses, so the hint always
+# matches what the speaker is actually being asked.
+DOMAIN_PROMPTS = {
+    lang: ", ".join(labels[lang][0] for labels in FIELD_TEXT.values()) for lang in SUPPORTED_LANGUAGES
+}
 
 
 class LocalWhisperSTTClient(STTClient):
@@ -46,7 +46,7 @@ class LocalWhisperSTTClient(STTClient):
             )
         return self._model
 
-    def transcribe(self, audio_bytes: bytes, audio_format: str = "wav") -> STTResult:
+    def transcribe(self, audio_bytes: bytes, audio_format: str = "wav", language: str = "en") -> STTResult:
         model = self._get_model()
 
         with tempfile.NamedTemporaryFile(suffix=f".{audio_format}", delete=False) as tmp:
@@ -60,7 +60,9 @@ class LocalWhisperSTTClient(STTClient):
             # optimizations; for this kind of short, structured speech the accuracy cost is
             # minimal while the time saved is real, since beam search width is the main cost
             # driver on CPU, not model size.
-            segments, _info = model.transcribe(tmp_path, beam_size=1, vad_filter=True)
+            segments, _info = model.transcribe(
+                tmp_path, beam_size=1, vad_filter=True, language=normalize_language(language)
+            )
             segments = list(segments)
         finally:
             os.remove(tmp_path)
@@ -85,24 +87,31 @@ class LocalWhisperSTTClient(STTClient):
 
 
 class GroqSTTClient(STTClient):
-    """STT provider backed by Groq's hosted whisper-large-v3-turbo. Same model family OpenAI's
-    API uses, but Groq serves it at much lower latency and (at time of writing) a generous free
-    tier - no local model download, no CPU inference cost, and noticeably fewer mishears than
-    the local 'base' model since large-v3 has far more parameters."""
+    """STT provider backed by Groq's hosted Whisper. Same model family OpenAI's API uses, but
+    Groq serves it at much lower latency and (at time of writing) a generous free tier - no
+    local model download, no CPU inference cost."""
 
-    def __init__(self, api_key: str | None = None, model: str = "whisper-large-v3-turbo"):
+    # whisper-large-v3-turbo drops decoder layers to cut latency, and that accuracy loss lands
+    # disproportionately on lower-resource languages - it's fine for English but produces
+    # badly garbled Hindi/Marathi transcriptions. The full large-v3 model is slower but is what
+    # correctness-sensitive non-English transcription actually needs here.
+    _MODEL_BY_LANGUAGE = {"en": "whisper-large-v3-turbo", "hi": "whisper-large-v3", "mr": "whisper-large-v3"}
+
+    def __init__(self, api_key: str | None = None, model: str | None = None):
         self._api_key = api_key or settings.stt_api_key or settings.backup_llm_api_key
-        self._model = model
+        self._model_override = model  # set to force one model regardless of language
 
-    def transcribe(self, audio_bytes: bytes, audio_format: str = "wav") -> STTResult:
+    def transcribe(self, audio_bytes: bytes, audio_format: str = "wav", language: str = "en") -> STTResult:
+        lang = normalize_language(language)
+        model = self._model_override or self._MODEL_BY_LANGUAGE[lang]
         response = httpx.post(
             GROQ_TRANSCRIPTION_URL,
             headers={"Authorization": f"Bearer {self._api_key}"},
             files={"file": (f"audio.{audio_format}", audio_bytes, f"audio/{audio_format}")},
             data={
-                "model": self._model,
-                "language": "en",
-                "prompt": DOMAIN_PROMPT,
+                "model": model,
+                "language": lang,
+                "prompt": DOMAIN_PROMPTS[lang],
                 "response_format": "verbose_json",
             },
             timeout=30.0,

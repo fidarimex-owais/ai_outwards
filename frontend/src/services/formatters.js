@@ -15,9 +15,3 @@ export function groupedQuestionsBody(questions) {
     .map((s) => `${s.title}:\n${s.items.map((q) => `${++counter}. ${q.question}`).join("\n")}`)
     .join("\n\n");
 }
-
-export function formatSubmission(submission) {
-  return Object.entries(submission)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join("\n");
-}

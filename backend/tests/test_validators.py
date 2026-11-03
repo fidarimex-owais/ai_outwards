@@ -26,6 +26,24 @@ def test_validate_text_too_long_rejected():
     assert not validate_text("x" * 300, "Company Name").valid
 
 
+def test_validate_text_closed_set_accepts_exact_predefined_value():
+    result = validate_text("Khorale Global", "Company Name", allowed_values=["Khorale Global", "Rajmata", "Jaywant"])
+    assert result.valid and result.value == "Khorale Global"
+
+
+def test_validate_text_closed_set_rejects_value_outside_the_list():
+    # Defense in depth: the extraction prompt instructs the LLM to only return one of the
+    # predefined options, but this must still catch it here if that's ever not followed,
+    # rather than silently storing an unknown company/brand name.
+    result = validate_text("Some Random Co", "Company Name", allowed_values=["Khorale Global", "Rajmata", "Jaywant"])
+    assert not result.valid
+
+
+def test_validate_text_no_allowed_values_accepts_anything():
+    result = validate_text("Any Free Text At All", "Line Mark", allowed_values=None)
+    assert result.valid and result.value == "Any Free Text At All"
+
+
 def test_validate_number_coercion_and_normalization():
     assert validate_number(42, "Four-Hand").value == 42
     assert validate_number("42", "Four-Hand").value == 42

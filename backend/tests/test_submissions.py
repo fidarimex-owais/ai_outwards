@@ -1,7 +1,7 @@
 from app.core.mongodb import get_db
 from app.features.submissions.repository import get_submission, insert_submission
 
-from tests.test_conversation_flow import BATCH1, BATCH2, BATCH3, TIME_RESPONSES, _answer
+from tests.test_conversation_flow import BATCH1, BATCH2, BATCH3, FIELD_RESPONSES, _answer
 
 
 CORRECTION_RESPONSES = {
@@ -11,7 +11,10 @@ CORRECTION_RESPONSES = {
 
 
 def _complete_conversation(client, fake_llm, extra_responses=None):
-    fake_llm(TIME_RESPONSES | (extra_responses or {}))
+    # Every field now always goes through the LLM, so every BATCH1/2/3 answer needs its own
+    # canned response (see test_conversation_flow.FIELD_RESPONSES), not just the one
+    # genuinely-ambiguous time phrase this used to rely on the rule tier to skip past.
+    fake_llm(FIELD_RESPONSES | (extra_responses or {}))
     session_id = client.post("/sessions").json()["session_id"]
     for batch in (BATCH1, BATCH2, BATCH3):
         for key, text in batch.items():

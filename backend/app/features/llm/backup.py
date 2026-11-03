@@ -11,9 +11,13 @@ class GroqLLMClient(LLMClient):
     OpenAI-compatible chat completions API, called directly via httpx to avoid pulling in
     an extra SDK for a single endpoint."""
 
-    def __init__(self, api_key: str | None = None, model: str = "openai/gpt-oss-20b"):
+    def __init__(self, api_key: str | None = None, model: str = "openai/gpt-oss-20b", max_tokens: int = 4096):
         self._api_key = api_key or settings.backup_llm_api_key
         self._model = model
+        # Same reasoning as GeminiLLMClient's max_output_tokens: without an explicit cap, a
+        # provider default can be too low for the 16-field batch extraction response and
+        # silently truncate the JSON mid-object.
+        self._max_tokens = max_tokens
 
     def generate(self, prompt: str, system: str | None = None) -> str:
         messages = []
@@ -24,7 +28,7 @@ class GroqLLMClient(LLMClient):
         response = httpx.post(
             GROQ_API_URL,
             headers={"Authorization": f"Bearer {self._api_key}"},
-            json={"model": self._model, "messages": messages},
+            json={"model": self._model, "messages": messages, "max_tokens": self._max_tokens},
             timeout=30.0,
         )
         response.raise_for_status()

@@ -1,23 +1,25 @@
 import { useState } from "react";
 import InputBar from "./InputBar";
+import { t } from "../services/i18n";
 import "./SummaryActions.css";
 
-export default function SummaryActions({ onConfirm, onCorrect, disabled, onTranscribe }) {
+export default function SummaryActions({ onConfirm, onCorrect, disabled, onTranscribe, language = "en" }) {
   const [correcting, setCorrecting] = useState(false);
 
   if (correcting) {
     return (
       <div className="summary-actions">
         <InputBar
-          placeholder='e.g. "Correct the labor name to Sagar Panidrahi"'
+          placeholder={t(language, "correctionPlaceholder")}
           disabled={disabled}
           onTranscribe={onTranscribe}
+          language={language}
           onSend={(text) => {
             onCorrect(text);
           }}
         />
         <button type="button" className="link-btn" onClick={() => setCorrecting(false)}>
-          Cancel
+          {t(language, "cancel")}
         </button>
       </div>
     );
@@ -26,10 +28,10 @@ export default function SummaryActions({ onConfirm, onCorrect, disabled, onTrans
   return (
     <div className="summary-actions">
       <button type="button" className="primary-btn" onClick={onConfirm} disabled={disabled}>
-        Confirm &amp; Save
+        {t(language, "confirmSave")}
       </button>
       <button type="button" className="link-btn" onClick={() => setCorrecting(true)} disabled={disabled}>
-        Correct a field
+        {t(language, "correctAField")}
       </button>
     </div>
   );

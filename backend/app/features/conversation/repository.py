@@ -14,13 +14,15 @@ def _key(session_id: str) -> str:
     return f"{_KEY_PREFIX}{session_id}"
 
 
-def new_session(session_id: str) -> dict:
+def new_session(session_id: str, language: str = "en") -> dict:
     now = datetime.now(timezone.utc).isoformat()
     return {
         "session_id": session_id,
         "state": SessionState.IDLE.value,
+        "language": language,  # fixed for the session's lifetime, chosen before it starts
         "current_batch": 1,
-        "answers": {},
+        "answers": {},  # English-normalized values - what gets stored in Mongo
+        "display_answers": {},  # same answers, in the conversation language - for echoing back
         "pending_clarification_field": None,
         "created_at": now,
         "updated_at": now,

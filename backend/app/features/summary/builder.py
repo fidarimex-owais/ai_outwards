@@ -1,46 +1,46 @@
+from app.features.i18n.translations import normalize_language, section_title, total_label, ui_text
+
 SECTIONS = [
     ("Company & Vehicle Details", [
-        ("company_name", "Company Name"),
-        ("vehicle_number", "Vehicle Number"),
-        ("brand", "Brand"),
-        ("line_mark", "Line Mark"),
-        ("weight", "Weight"),
+        "company_name", "vehicle_number", "brand", "line_mark", "weight",
     ]),
     ("Banana Hand & Cluster Quantities", [
-        ("four_hand", "Four-Hand Quantity"),
-        ("five_hand", "Five-Hand Quantity"),
-        ("six_hand", "Six-Hand Quantity"),
-        ("eight_hand", "Eight-Hand Quantity"),
-        ("cluster", "Cluster Quantity"),
-        ("total", "Total Quantity"),
+        "four_hand", "five_hand", "six_hand", "eight_hand", "cluster", "total",
     ]),
     ("Additional Information", [
-        ("remarks", "Remarks"),
-        ("labor_name", "Labor Name"),
-        ("vehicle_out_time", "Vehicle Out Time"),
-        ("vehicle_in_time", "Vehicle In Time"),
-        ("vehicle_for_storage", "Vehicle for Storage"),
-        ("vehicle_receiver_name", "Vehicle Receiver Name"),
+        "remarks", "labor_name", "vehicle_out_time", "vehicle_in_time",
+        "vehicle_for_storage", "vehicle_receiver_name",
     ]),
 ]
 
 
-def build_summary(fields: dict) -> str:
+def _field_label(key: str, language: str) -> str:
+    if key == "total":
+        return total_label(language)
+    # Imported lazily to avoid a circular import (fields.py doesn't need summary/builder.py,
+    # but importing at module load time would still couple the two on startup order).
+    from app.features.conversation.fields import get_field
+
+    return get_field(key).localized_label(language)
+
+
+def build_summary(fields: dict, language: str = "en") -> str:
     """Template-only summary builder, no LLM — per spec, the LLM never touches confirmation
-    text. `fields` must already be validated and `total` already computed by
-    validation/calculator.py before this is called."""
-    all_keys = [key for _, field_list in SECTIONS for key, _ in field_list]
+    text. `fields` must contain every field key below (display values - already in the
+    conversation language) plus `total` (numeric, already computed)."""
+    language = normalize_language(language)
+    all_keys = [key for _, field_keys in SECTIONS for key in field_keys]
     missing_keys = [key for key in all_keys if key not in fields]
     if missing_keys:
         raise ValueError(f"Missing fields for summary: {', '.join(missing_keys)}")
 
-    lines = ["Please confirm the following details:", ""]
-    for section_title, field_list in SECTIONS:
-        lines.append(f"{section_title}:")
-        for key, label in field_list:
+    lines = [ui_text("confirm_header", language), ""]
+    for section_canonical, field_keys in SECTIONS:
+        lines.append(f"{section_title(section_canonical, language)}:")
+        for key in field_keys:
             value = fields.get(key)
             display = "—" if value in (None, "") else value
-            lines.append(f"  {label}: {display}")
+            lines.append(f"  {_field_label(key, language)}: {display}")
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

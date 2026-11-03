@@ -1,6 +1,6 @@
 import json
 
-from tests.test_conversation_flow import BATCH1, BATCH2, BATCH3, TIME_RESPONSES
+from tests.test_conversation_flow import BATCH1, BATCH2, BATCH3, FIELD_RESPONSES
 
 ALL_16_KEYS = [
     "company_name", "vehicle_number", "brand", "line_mark", "weight",
@@ -27,7 +27,7 @@ def test_full_batch_answered_in_one_call_reaches_awaiting_confirmation(client, f
     # feature: one long utterance covering everything, one LLM call, straight to summary.
     fake_llm({
         "company": _fake_batch_response({
-            "company_name": "ABC Traders", "vehicle_number": "MH12AB1234", "brand": "Chiquita",
+            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
             "line_mark": "Line Three", "weight": 1200,
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "remarks": "", "labor_name": "Ramesh Kumar",
@@ -38,7 +38,7 @@ def test_full_batch_answered_in_one_call_reaches_awaiting_confirmation(client, f
     session_id = client.post("/sessions").json()["session_id"]
 
     r = client.post(f"/sessions/{session_id}/answer-batch", json={
-        "text": "company ABC Traders, vehicle MH12AB1234, brand Chiquita, line mark Line Three, weight twelve hundred, "
+        "text": "company Khorale Global, vehicle MH12AB1234, brand Joker Banana, line mark Line Three, weight twelve hundred, "
                 "four hand ten, five hand twenty, six hand five, eight hand three, cluster two, "
                 "no remarks, labor Ramesh Kumar, out time half past two, in time nine AM, for storage yes, receiver Suresh"
     })
@@ -53,7 +53,7 @@ def test_partial_batch_regroups_just_the_missed_ones(client, fake_llm):
     # weight is "ambiguous" in the fake response - everything else succeeds
     fake_llm({
         "company": _fake_batch_response({
-            "company_name": "ABC Traders", "vehicle_number": "MH12AB1234", "brand": "Chiquita",
+            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
             "line_mark": "Line Three",
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "remarks": "", "labor_name": "Ramesh Kumar",
@@ -64,7 +64,7 @@ def test_partial_batch_regroups_just_the_missed_ones(client, fake_llm):
     session_id = client.post("/sessions").json()["session_id"]
 
     r = client.post(f"/sessions/{session_id}/answer-batch", json={
-        "text": "company ABC Traders vehicle MH12AB1234 brand Chiquita line mark Line Three, didn't catch the weight, "
+        "text": "company Khorale Global vehicle MH12AB1234 brand Joker Banana line mark Line Three, didn't catch the weight, "
                 "and everything else"
     })
     data = r.json()
@@ -75,7 +75,10 @@ def test_partial_batch_regroups_just_the_missed_ones(client, fake_llm):
     }]  # only what's still missing is grouped into the follow-up, not the whole form again
     assert data["next_field_key"] == "weight"
 
-    # finish the missed field individually, via the existing single-field endpoint
+    # finish the missed field individually, via the existing single-field endpoint - this
+    # replaces the installed LLM chain, so it needs its own canned response too now that
+    # extract_field always calls the LLM.
+    fake_llm({'"1200"': '{"value": 1200, "ambiguous": false}'})
     r = client.post(f"/sessions/{session_id}/answer", json={"field_key": "weight", "text": "1200"})
     assert r.json()["state"] == "AWAITING_CONFIRMATION"  # that was the last field
 
@@ -86,7 +89,7 @@ def test_three_missed_fields_grouped_into_one_followup_and_resolved_together(cli
     answering all three together resolves all of them in one call."""
     fake_llm({
         "company": _fake_batch_response({
-            "company_name": "ABC Traders", "vehicle_number": "MH12AB1234", "brand": "Chiquita",
+            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
             "line_mark": "Line Three", "weight": 1200,
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "labor_name": "Ramesh Kumar",
@@ -97,7 +100,7 @@ def test_three_missed_fields_grouped_into_one_followup_and_resolved_together(cli
     })
     session_id = client.post("/sessions").json()["session_id"]
 
-    r = client.post(f"/sessions/{session_id}/answer-batch", json={"text": "company ABC Traders, everything else as usual"})
+    r = client.post(f"/sessions/{session_id}/answer-batch", json={"text": "company Khorale Global, everything else as usual"})
     data = r.json()
     assert data["state"] == "COLLECTING"
     missed_keys = {q["key"] for q in data["questions"]}
@@ -121,7 +124,7 @@ def test_batch_answer_accepted_from_clarification_state(client, fake_llm):
     of COLLECTING for answer-batch purposes, not a dead end."""
     fake_llm({
         "company": _fake_batch_response({
-            "company_name": "ABC Traders", "vehicle_number": "MH12AB1234", "brand": "Chiquita",
+            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
             "line_mark": "Line Three", "weight": 1200,
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "remarks": "", "labor_name": "Ramesh Kumar",
@@ -142,7 +145,7 @@ def test_batch_answer_accepted_from_clarification_state(client, fake_llm):
 
     # and the batch endpoint must still accept a recording from this state
     r = client.post(f"/sessions/{session_id}/answer-batch", json={
-        "text": "company ABC Traders, vehicle MH12AB1234, brand Chiquita, line mark Line Three, weight twelve hundred, "
+        "text": "company Khorale Global, vehicle MH12AB1234, brand Joker Banana, line mark Line Three, weight twelve hundred, "
                 "four hand ten, five hand twenty, six hand five, eight hand three, cluster two, "
                 "no remarks, labor Ramesh Kumar, out time half past two, in time nine AM, for storage yes, receiver Suresh"
     })
@@ -150,7 +153,7 @@ def test_batch_answer_accepted_from_clarification_state(client, fake_llm):
 
 
 def test_batch_answer_rejected_outside_collecting_or_clarification_state(client, fake_llm):
-    fake_llm(TIME_RESPONSES)
+    fake_llm(FIELD_RESPONSES)
     session_id = client.post("/sessions").json()["session_id"]
     for batch in (BATCH1, BATCH2, BATCH3):
         for key, text in batch.items():
@@ -183,7 +186,7 @@ def test_batch_all_llms_failed_pauses_session(client):
     app.dependency_overrides[get_llm_chain] = lambda: LLMChain(primary=AlwaysFailLLM(), backup=AlwaysFailLLM())
 
     session_id = client.post("/sessions").json()["session_id"]
-    r = client.post(f"/sessions/{session_id}/answer-batch", json={"text": "company ABC Traders"})
+    r = client.post(f"/sessions/{session_id}/answer-batch", json={"text": "company Khorale Global"})
     assert r.status_code == 503
 
     r = client.get(f"/sessions/{session_id}")

@@ -12,10 +12,12 @@ import {
   submitBatchAnswer,
   transcribeAudio,
 } from "../services/api";
-import { formatSubmission, groupedQuestionsBody } from "../services/formatters";
+import { groupedQuestionsBody } from "../services/formatters";
+import { LANGUAGES, t } from "../services/i18n";
 import "./ChatPage.css";
 
 const SESSION_KEY = "vda_session_id";
+const LANGUAGE_KEY = "vda_language";
 let nextMessageId = 1;
 
 export default function ChatPage({ token, username, onLogout }) {
@@ -23,44 +25,50 @@ export default function ChatPage({ token, username, onLogout }) {
   const [turn, setTurn] = useState(null); // last TurnResponse from the backend
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [language, setLanguage] = useState(sessionStorage.getItem(LANGUAGE_KEY) || null);
   const sessionIdRef = useRef(sessionStorage.getItem(SESSION_KEY));
+  // Only a brand-new entry needs the picker - a resumed session already has a language fixed
+  // server-side for its whole lifetime (see backend/app/features/conversation/repository.py).
+  const [needsLanguage, setNeedsLanguage] = useState(!sessionIdRef.current && !language);
 
   const addMessage = useCallback((role, text) => {
     setMessages((prev) => [...prev, { id: nextMessageId++, role, text }]);
   }, []);
 
-  const describeTurn = useCallback((t) => {
-    if (t.state === "PAUSED") {
-      return "Something went wrong processing your last answer. I've saved your progress - click Try Again when you're ready.";
+  const describeTurn = useCallback((turnData) => {
+    const lang = turnData.language || language || "en";
+    if (turnData.state === "PAUSED") {
+      return t(lang, "paused");
     }
-    if (t.state === "AWAITING_CONFIRMATION" && t.summary) {
-      return t.summary;
+    if (turnData.state === "AWAITING_CONFIRMATION" && turnData.summary) {
+      return turnData.summary;
     }
-    if (t.state === "COMPLETED") {
-      return "✅ Saved!\n\n" + (t.summary || "Your entry has been submitted.");
+    if (turnData.state === "COMPLETED") {
+      return t(lang, "savedPrefix") + (turnData.summary || t(lang, "savedFallback"));
     }
-    if (t.state === "COLLECTING" || t.state === "CLARIFICATION") {
-      const questions = t.questions || [];
-      const answered = t.answered_field_keys || [];
+    if (turnData.state === "COLLECTING" || turnData.state === "CLARIFICATION") {
+      const questions = turnData.questions || [];
+      const answered = turnData.answered_field_keys || [];
       const parts = [];
-      if (t.clarification_prompt) parts.push(t.clarification_prompt);
+      if (turnData.clarification_prompt) parts.push(turnData.clarification_prompt);
       if (questions.length > 0) {
-        const intro =
-          answered.length === 0
-            ? "Please answer the following questions - you can type or record them all together:"
-            : "I still need a few things - please answer these together:";
+        const intro = answered.length === 0 ? t(lang, "intro") : t(lang, "stillNeed");
         parts.push(`${intro}\n\n${groupedQuestionsBody(questions)}`);
       }
-      return parts.join("\n\n") || "Please continue.";
+      return parts.join("\n\n") || t(lang, "pleaseContinue");
     }
-    return "Please continue.";
-  }, []);
+    return t(lang, "pleaseContinue");
+  }, [language]);
 
   const applyTurn = useCallback(
-    (t, { silent = false } = {}) => {
-      setTurn(t);
-      if (!silent) addMessage("assistant", describeTurn(t));
-      if (t.state === "COMPLETED") {
+    (turnData, { silent = false } = {}) => {
+      setTurn(turnData);
+      if (turnData.language) {
+        setLanguage(turnData.language);
+        sessionStorage.setItem(LANGUAGE_KEY, turnData.language);
+      }
+      if (!silent) addMessage("assistant", describeTurn(turnData));
+      if (turnData.state === "COMPLETED") {
         sessionStorage.removeItem(SESSION_KEY);
         sessionIdRef.current = null;
       }
@@ -68,24 +76,28 @@ export default function ChatPage({ token, username, onLogout }) {
     [addMessage, describeTurn]
   );
 
-  // Boot: resume an existing session if one exists, otherwise start a brand-new one. A new
-  // conversation shows all 16 questions; a resumed one restores exactly where it left off.
+  const startNewSession = useCallback(
+    async (chosenLanguage) => {
+      const t = await createSession(token, chosenLanguage);
+      sessionIdRef.current = t.session_id;
+      sessionStorage.setItem(SESSION_KEY, t.session_id);
+      applyTurn(t);
+    },
+    [token, applyTurn]
+  );
+
+  // Boot: resume an existing session if one exists. A brand-new conversation instead waits
+  // for the language picker (see handleLanguageSelect) before creating a session, since the
+  // language is fixed for the session's whole lifetime once chosen.
   useEffect(() => {
+    if (!sessionIdRef.current) return;
     let cancelled = false;
     async function boot() {
       setBusy(true);
       try {
-        if (sessionIdRef.current) {
-          addMessage("system", "Resuming your session...");
-          const t = await getSession(token, sessionIdRef.current);
-          if (!cancelled) applyTurn(t);
-        } else {
-          const t = await createSession(token);
-          if (cancelled) return;
-          sessionIdRef.current = t.session_id;
-          sessionStorage.setItem(SESSION_KEY, t.session_id);
-          applyTurn(t);
-        }
+        addMessage("system", t(language || "en", "resuming"));
+        const turnData = await getSession(token, sessionIdRef.current);
+        if (!cancelled) applyTurn(turnData);
       } catch (bootErr) {
         if (bootErr instanceof ApiError && bootErr.status === 401) {
           // The token itself is invalid/expired - retrying would just 401 again. Log out
@@ -93,18 +105,10 @@ export default function ChatPage({ token, username, onLogout }) {
           onLogout();
           return;
         }
-        // stale/expired session id - drop it and start a fresh conversation
+        // stale/expired session id - drop it and fall back to the language picker
         sessionStorage.removeItem(SESSION_KEY);
         sessionIdRef.current = null;
-        try {
-          const t = await createSession(token);
-          if (cancelled) return;
-          sessionIdRef.current = t.session_id;
-          sessionStorage.setItem(SESSION_KEY, t.session_id);
-          applyTurn(t);
-        } catch (err) {
-          if (!cancelled) setError(err.message);
-        }
+        if (!cancelled) setNeedsLanguage(true);
       } finally {
         if (!cancelled) setBusy(false);
       }
@@ -116,8 +120,23 @@ export default function ChatPage({ token, username, onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function handleLanguageSelect(code) {
+    setNeedsLanguage(false);
+    setLanguage(code);
+    sessionStorage.setItem(LANGUAGE_KEY, code);
+    setError("");
+    setBusy(true);
+    try {
+      await startNewSession(code);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleTranscribe(blob) {
-    return transcribeAudio(token, blob);
+    return transcribeAudio(token, blob, language || "en");
   }
 
   async function handleSend(text) {
@@ -126,12 +145,11 @@ export default function ChatPage({ token, username, onLogout }) {
     addMessage("user", text);
     setBusy(true);
     try {
-      const t = await submitBatchAnswer(token, sessionIdRef.current, text);
-      applyTurn(t);
+      const turnData = await submitBatchAnswer(token, sessionIdRef.current, text);
+      applyTurn(turnData);
     } catch (err) {
       if (err instanceof ApiError && err.status === 503) {
-        const t = { state: "PAUSED" };
-        applyTurn(t);
+        applyTurn({ state: "PAUSED", language });
       } else {
         setError(err.message);
       }
@@ -144,8 +162,8 @@ export default function ChatPage({ token, username, onLogout }) {
     setError("");
     setBusy(true);
     try {
-      const t = await resumeSession(token, sessionIdRef.current);
-      applyTurn(t);
+      const turnData = await resumeSession(token, sessionIdRef.current);
+      applyTurn(turnData);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -157,8 +175,12 @@ export default function ChatPage({ token, username, onLogout }) {
     setError("");
     setBusy(true);
     try {
-      const submission = await confirmSession(token, sessionIdRef.current);
-      applyTurn({ state: "COMPLETED", summary: formatSubmission(submission) });
+      // The localized summary already shown at AWAITING_CONFIRMATION hasn't changed - reuse
+      // it rather than reformatting the raw submission response, which is English-only (see
+      // backend/app/features/submissions/service.py) and would otherwise mix languages here.
+      const previousSummary = turn?.summary;
+      await confirmSession(token, sessionIdRef.current);
+      applyTurn({ state: "COMPLETED", language, summary: previousSummary });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -171,8 +193,24 @@ export default function ChatPage({ token, username, onLogout }) {
     addMessage("user", text);
     setBusy(true);
     try {
-      const t = await correctField(token, sessionIdRef.current, text);
-      applyTurn(t);
+      const turnData = await correctField(token, sessionIdRef.current, text);
+      applyTurn(turnData);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function _startFreshConversation() {
+    setError("");
+    setTurn(null);
+    setMessages([]);
+    sessionStorage.removeItem(SESSION_KEY);
+    sessionIdRef.current = null;
+    setBusy(true);
+    try {
+      await startNewSession(language || "en");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -181,52 +219,90 @@ export default function ChatPage({ token, username, onLogout }) {
   }
 
   function handleNewEntry() {
-    setMessages([]);
-    sessionStorage.removeItem(SESSION_KEY);
-    sessionIdRef.current = null;
-    window.location.reload();
+    // Nothing to lose here - the entry is already saved - so no confirmation needed, and the
+    // language carries over rather than re-prompting for it every time.
+    _startFreshConversation();
+  }
+
+  function handleClearChat() {
+    if (!window.confirm(t(lang, "clearChatConfirm"))) return;
+    _startFreshConversation();
   }
 
   const state = turn?.state;
+  const lang = language || "en";
 
   return (
     <div className="chat-page">
       <header className="chat-header">
-        <span className="chat-title">Voice Data Collection Assistant</span>
+        <span className="chat-title">{t(lang, "chatTitle")}</span>
         <div className="chat-header-right">
           <span className="chat-username">{username}</span>
+          {!needsLanguage && state !== "COMPLETED" && (
+            <button type="button" className="link-btn" onClick={handleClearChat} disabled={busy}>
+              {t(lang, "clearChat")}
+            </button>
+          )}
           <button type="button" className="link-btn" onClick={onLogout}>
-            Log out
+            {t(lang, "logOut")}
           </button>
         </div>
       </header>
 
-      <ChatThread messages={messages} />
-
-      {error && <div className="chat-error">{error}</div>}
-
-      {state === "PAUSED" && (
-        <div className="summary-actions">
-          <button type="button" className="primary-btn" onClick={handleResume} disabled={busy}>
-            Try Again
-          </button>
+      {needsLanguage ? (
+        <div className="language-picker">
+          <p className="language-picker-title">{t("en", "chooseLanguage")}</p>
+          <p className="language-picker-hint">{t("en", "chooseLanguageHint")}</p>
+          <div className="language-picker-options">
+            {LANGUAGES.map(({ code, label }) => (
+              <button
+                key={code}
+                type="button"
+                className="primary-btn"
+                disabled={busy}
+                onClick={() => handleLanguageSelect(code)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
+      ) : (
+        <>
+          <ChatThread messages={messages} />
 
-      {state === "AWAITING_CONFIRMATION" && (
-        <SummaryActions onConfirm={handleConfirm} onCorrect={handleCorrect} disabled={busy} onTranscribe={handleTranscribe} />
-      )}
+          {error && <div className="chat-error">{error}</div>}
 
-      {state === "COMPLETED" && (
-        <div className="summary-actions">
-          <button type="button" className="primary-btn" onClick={handleNewEntry}>
-            Start Another Entry
-          </button>
-        </div>
-      )}
+          {state === "PAUSED" && (
+            <div className="summary-actions">
+              <button type="button" className="primary-btn" onClick={handleResume} disabled={busy}>
+                {t(lang, "tryAgain")}
+              </button>
+            </div>
+          )}
 
-      {(state === "COLLECTING" || state === "CLARIFICATION" || state === undefined) && (
-        <InputBar onSend={handleSend} onTranscribe={handleTranscribe} disabled={busy} />
+          {state === "AWAITING_CONFIRMATION" && (
+            <SummaryActions
+              onConfirm={handleConfirm}
+              onCorrect={handleCorrect}
+              disabled={busy}
+              onTranscribe={handleTranscribe}
+              language={lang}
+            />
+          )}
+
+          {state === "COMPLETED" && (
+            <div className="summary-actions">
+              <button type="button" className="primary-btn" onClick={handleNewEntry}>
+                {t(lang, "startAnother")}
+              </button>
+            </div>
+          )}
+
+          {(state === "COLLECTING" || state === "CLARIFICATION" || state === undefined) && (
+            <InputBar onSend={handleSend} onTranscribe={handleTranscribe} disabled={busy} language={lang} />
+          )}
+        </>
       )}
     </div>
   );

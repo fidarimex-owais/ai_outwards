@@ -1,5 +1,7 @@
+import json
+
 BATCH1 = {
-    "company_name": "ABC Traders", "vehicle_number": "MH12AB1234", "brand": "Chiquita",
+    "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
     "line_mark": "Line Three", "weight": "twelve hundred",
 }
 BATCH2 = {
@@ -7,17 +9,45 @@ BATCH2 = {
 }
 BATCH3 = {
     "remarks": "", "labor_name": "Ramesh Kumar",
-    # vehicle_in_time has no am/pm marker and no "o'clock"/"half past" keyword -> the rule
-    # can't resolve it, so it genuinely escalates to the LLM (see TIME_RESPONSES below).
     "vehicle_in_time": "the truck entered this morning at nine",
-    # vehicle_out_time IS resolved by the rule (utils/time_parse.py) directly - "half past
-    # two in the afternoon" needs no LLM call.
     "vehicle_out_time": "the truck left at half past two in the afternoon",
     "vehicle_for_storage": "yes", "vehicle_receiver_name": "Suresh",
 }
-TIME_RESPONSES = {
-    "entered this morning at nine": '{"value": "09:00", "ambiguous": false}',
-}
+
+# Every field now always goes through the LLM (no Python rule/keyword shortcut in front of
+# it), so each distinct raw answer used across these tests needs its own canned response.
+# FakeLLM matches by substring of the prompt; a bare word like "two" or "yes" would also match
+# unrelated boilerplate instruction text that happens to contain that word (e.g. "...or even as
+# two separate sentences", "remarks, yes/no answers"), and a bare quoted name like "Khorale
+# Global" would also match company_name's own "[one of: ...]" closed-set list (which quotes
+# every candidate name verbatim in every prompt, regardless of what was actually said) - so
+# needles here anchor to the trailing `"<text>"\n\n` that only the actual "Spoken answer/
+# correction: ..." line has, not any other quoted occurrence of the same text.
+def _resp(raw_text: str, value) -> tuple[str, str]:
+    return f'"{raw_text}"\n\n', json.dumps({"value": value, "ambiguous": False})
+
+
+FIELD_RESPONSES = dict([
+    _resp("Khorale Global", "Khorale Global"),
+    _resp("MH12AB1234", "MH12AB1234"),
+    _resp("Joker Banana", "Joker Banana"),
+    _resp("Line Three", "Line Three"),
+    _resp("twelve hundred", 1200),
+    _resp("ten", 10),
+    _resp("twenty", 20),
+    _resp("five", 5),
+    _resp("three", 3),
+    _resp("two", 2),
+    _resp("Ramesh Kumar", "Ramesh Kumar"),
+    _resp("Ramesh", "Ramesh"),
+    _resp("the truck entered this morning at nine", "09:00"),
+    _resp("the truck left at half past two in the afternoon", "14:30"),
+    _resp("yes", "yes"),
+    _resp("Suresh", "Suresh"),
+    _resp("MH14XY9999", "MH14XY9999"),
+    _resp("none", 0),
+])
+TIME_RESPONSES = dict([_resp("entered this morning at nine", "09:00")])
 
 
 def _answer(client, session_id, field_key, text):
@@ -26,7 +56,7 @@ def _answer(client, session_id, field_key, text):
 
 def test_full_happy_path_reaches_awaiting_confirmation(client, fake_llm):
     # All 16 fields are shown and answered in a single "batch" now - no separate rounds.
-    fake_llm(TIME_RESPONSES)
+    fake_llm(FIELD_RESPONSES)
 
     r = client.post("/sessions")
     assert r.status_code == 200
@@ -37,7 +67,7 @@ def test_full_happy_path_reaches_awaiting_confirmation(client, fake_llm):
     assert data["next_field_key"] == "company_name"  # first field overall
     assert data["answered_field_keys"] == []
 
-    r = _answer(client, session_id, "company_name", "ABC Traders")
+    r = _answer(client, session_id, "company_name", "Khorale Global")
     data = r.json()
     assert data["next_field_key"] == "vehicle_number"
     assert data["answered_field_keys"] == ["company_name"]
@@ -61,7 +91,7 @@ def test_full_happy_path_reaches_awaiting_confirmation(client, fake_llm):
 def test_zero_quantity_via_none_is_accepted_not_rejected(client, fake_llm):
     # Regression test: "cluster is none" was being rejected as unclear instead of accepted
     # as 0 - a declined quantity is a valid answer, not a missing one.
-    fake_llm({})  # should resolve via the rule, no LLM call needed
+    fake_llm(dict([_resp("none", 0)]))
     session_id = client.post("/sessions").json()["session_id"]
 
     r = _answer(client, session_id, "cluster", "none")
@@ -71,9 +101,11 @@ def test_zero_quantity_via_none_is_accepted_not_rejected(client, fake_llm):
 
 
 def test_clarification_loop_on_invalid_answer(client, fake_llm):
-    fake_llm({})
+    fake_llm(dict([_resp("MH14XY9999", "MH14XY9999")]))
     session_id = client.post("/sessions").json()["session_id"]
 
+    # "not a plate at all" has no registered response, so FakeLLM's default
+    # ({"value": null, "ambiguous": true}) applies - the LLM genuinely finding this unclear.
     r = _answer(client, session_id, "vehicle_number", "not a plate at all")
     data = r.json()
     assert data["state"] == "CLARIFICATION"
@@ -85,10 +117,10 @@ def test_clarification_loop_on_invalid_answer(client, fake_llm):
 
 
 def test_session_recovery_mid_batch_shows_correct_next_field(client, fake_llm):
-    fake_llm({})
+    fake_llm(dict([_resp("Khorale Global", "Khorale Global"), _resp("MH12AB1234", "MH12AB1234")]))
     session_id = client.post("/sessions").json()["session_id"]
 
-    _answer(client, session_id, "company_name", "ABC Traders")
+    _answer(client, session_id, "company_name", "Khorale Global")
     _answer(client, session_id, "vehicle_number", "MH12AB1234")
 
     # simulate a page reload: nothing client-side, ask the server fresh
@@ -112,7 +144,7 @@ def test_all_llms_failed_pauses_session_and_resume_recovers(client, fake_llm):
 
     session_id = client.post("/sessions").json()["session_id"]
 
-    # vehicle_out_time has no Python rule -> must escalate to the (failing) LLM
+    # Every field goes through the (failing) LLM now, this one included.
     r = _answer(client, session_id, "vehicle_out_time", "around three in the afternoon")
     assert r.status_code == 503
 
@@ -125,6 +157,11 @@ def test_all_llms_failed_pauses_session_and_resume_recovers(client, fake_llm):
 
 def test_time_sequence_validation_rejects_out_before_in(client, fake_llm):
     fake_llm({
+        **FIELD_RESPONSES,
+        # Plain (unquoted) substrings here, not _resp()'s quoted form: these intentionally
+        # match only the distinguishing tail of a longer sentence ("the truck entered at two
+        # in the afternoon"), so anchoring to the full quoted raw-text boundary would miss.
+        # They're multi-word and specific enough not to collide with anything else.
         "entered at two in the afternoon": '{"value": "14:00", "ambiguous": false}',
         "left at five in the morning": '{"value": "05:00", "ambiguous": false}',
         "left at four in the afternoon": '{"value": "16:00", "ambiguous": false}',

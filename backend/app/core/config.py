@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     backup_llm_provider: str = "groq"
     backup_llm_api_key: str = ""
 
-    # Speech-to-Text: "groq" (cloud, whisper-large-v3-turbo, far more accurate) or "whisper"
-    # (local faster-whisper, no network/API key needed but noticeably less accurate)
+    # Speech-to-Text: "groq" (cloud Whisper, far more accurate) or "whisper" (local
+    # faster-whisper, no network/API key needed but noticeably less accurate)
     stt_provider: str = "groq"
     stt_api_key: str = ""
 

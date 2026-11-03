@@ -5,7 +5,7 @@ from redis import Redis
 
 from app.core.redis import get_redis
 from app.features.auth.dependencies import get_current_user
-from app.features.conversation.schemas import AnswerRequest, BatchAnswerRequest, TurnResponse
+from app.features.conversation.schemas import AnswerRequest, BatchAnswerRequest, CreateSessionRequest, TurnResponse
 from app.features.conversation.service import ConversationService
 from app.features.llm.chain import LLMChain, get_llm_chain
 
@@ -19,9 +19,12 @@ def get_conversation_service(
 
 
 @router.post("", response_model=TurnResponse)
-def create_session(service: ConversationService = Depends(get_conversation_service)) -> TurnResponse:
+def create_session(
+    body: CreateSessionRequest = CreateSessionRequest(),
+    service: ConversationService = Depends(get_conversation_service),
+) -> TurnResponse:
     session_id = str(uuid.uuid4())
-    return service.start_session(session_id)
+    return service.start_session(session_id, body.language)
 
 
 @router.get("/{session_id}", response_model=TurnResponse)
