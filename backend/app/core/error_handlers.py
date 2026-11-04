@@ -8,6 +8,8 @@ from app.core.exceptions import (
     InvalidTransition,
     SessionExpired,
     SessionNotFound,
+    TooManyLoginAttempts,
+    UnknownField,
 )
 
 
@@ -27,6 +29,17 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(InvalidCredentials)
     async def _invalid_credentials(request: Request, exc: InvalidCredentials) -> JSONResponse:
         return JSONResponse(status_code=401, content={"error": "invalid_credentials", "detail": str(exc)})
+
+    @app.exception_handler(UnknownField)
+    async def _unknown_field(request: Request, exc: UnknownField) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"error": "unknown_field", "detail": str(exc)})
+
+    @app.exception_handler(TooManyLoginAttempts)
+    async def _too_many_login_attempts(request: Request, exc: TooManyLoginAttempts) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "too_many_login_attempts", "detail": "Too many failed attempts. Try again later."},
+        )
 
     @app.exception_handler(AllLLMsFailed)
     async def _all_llms_failed(request: Request, exc: AllLLMsFailed) -> JSONResponse:

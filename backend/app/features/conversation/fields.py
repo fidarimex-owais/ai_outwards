@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from app.core.exceptions import UnknownField
 from app.features.extraction.schemas import FieldType
 from app.features.i18n.translations import field_label, field_question
 
@@ -77,7 +78,10 @@ _BY_KEY = {f.key: f for f in FIELD_DEFINITIONS}
 
 
 def get_field(key: str) -> FieldDefinition:
-    return _BY_KEY[key]
+    try:
+        return _BY_KEY[key]
+    except KeyError:
+        raise UnknownField(key) from None
 
 
 def get_batch(batch_number: int) -> list[FieldDefinition]:

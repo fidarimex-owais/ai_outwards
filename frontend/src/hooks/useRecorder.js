@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 // Manual recording only (click to start, click Stop or Cancel to end) - this spec doesn't
 // ask for a hands-free/auto-stop mode, so there's no silence detection here, just live
@@ -85,6 +85,24 @@ export function useRecorder() {
       }),
     [stopVolumeLoop]
   );
+
+  // Releases the mic/audio-context on unmount if a recording was left running - e.g. the
+  // owning component unmounts (logout) while the user never clicked Stop/Cancel. Without
+  // this, getUserMedia's stream keeps the mic hot indefinitely.
+  useEffect(() => {
+    return () => {
+      stopVolumeLoop();
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        try {
+          recorder.stop();
+        } catch {
+          // already stopping/stopped - nothing to do
+        }
+      }
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, [stopVolumeLoop]);
 
   return { isRecording, start, stop };
 }

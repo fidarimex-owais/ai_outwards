@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.mongodb import get_db
 from app.features.submissions.repository import get_submission, insert_submission
 
@@ -81,6 +83,35 @@ def test_cannot_reconfirm_or_correct_after_completion(client, fake_llm, created_
     db = get_db()
     doc = db["submissions"].find_one({"session_id": session_id})
     assert doc["labor_name"] == "Ramesh Kumar"  # unchanged by the rejected attempts
+
+
+def test_confirm_failure_returns_to_awaiting_confirmation_and_is_retryable(client, fake_llm, created_sessions, monkeypatch):
+    # Regression test: a non-duplicate-key failure during /confirm must not strand the
+    # session in SAVING forever - it should fall back to AWAITING_CONFIRMATION so the client
+    # can retry (previously, only DuplicateKeyError was handled; any other exception left the
+    # session permanently stuck, since SAVING has no "confirm" transition).
+    session_id = _complete_conversation(client, fake_llm)
+    created_sessions.append(session_id)
+
+    import app.features.submissions.service as submissions_service
+
+    def _boom(db, submission):
+        raise RuntimeError("simulated Mongo outage")
+
+    monkeypatch.setattr(submissions_service, "insert_submission", _boom)
+
+    # TestClient re-raises unhandled server exceptions by default rather than turning them
+    # into a response (real clients would just see a 500) - the behavior under test is what
+    # happens to session state afterward, not the exact response TestClient surfaces here.
+    with pytest.raises(RuntimeError):
+        client.post(f"/sessions/{session_id}/confirm")
+
+    r = client.get(f"/sessions/{session_id}")
+    assert r.json()["state"] == "AWAITING_CONFIRMATION"
+
+    monkeypatch.undo()
+    r = client.post(f"/sessions/{session_id}/confirm")
+    assert r.status_code == 200
 
 
 def test_insert_submission_is_idempotent(client):

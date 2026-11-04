@@ -131,6 +131,17 @@ def test_session_recovery_mid_batch_shows_correct_next_field(client, fake_llm):
     assert data["answered_field_keys"] == ["company_name", "vehicle_number"]
 
 
+def test_unknown_field_key_returns_400_not_500(client, fake_llm):
+    # Regression test: an unrecognized field_key used to raise an unguarded KeyError inside
+    # get_field(), surfacing as an unhandled 500 instead of a clean 4xx.
+    fake_llm(FIELD_RESPONSES)
+    session_id = client.post("/sessions").json()["session_id"]
+
+    r = _answer(client, session_id, "not_a_real_field", "some answer")
+    assert r.status_code == 400
+    assert r.json()["error"] == "unknown_field"
+
+
 def test_all_llms_failed_pauses_session_and_resume_recovers(client, fake_llm):
     from app.features.llm.base import LLMClient
     from app.features.llm.chain import LLMChain, get_llm_chain

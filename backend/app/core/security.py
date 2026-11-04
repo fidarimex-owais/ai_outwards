@@ -7,6 +7,12 @@ from app.core.config import settings
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# A fixed, valid bcrypt hash with no corresponding real account - verified against on an
+# unknown username so that lookup takes the same bcrypt-verify time as a known username with
+# the wrong password, instead of returning immediately and leaking which usernames exist via
+# response timing.
+_DUMMY_HASH = _pwd_context.hash("not-a-real-password")
+
 
 def hash_password(plain_password: str) -> str:
     return _pwd_context.hash(plain_password)

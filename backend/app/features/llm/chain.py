@@ -1,7 +1,11 @@
+import logging
+
 from app.core.exceptions import AllLLMsFailed
 from app.features.llm.backup import GroqLLMClient
 from app.features.llm.base import LLMClient
 from app.features.llm.gemini import GeminiLLMClient
+
+logger = logging.getLogger(__name__)
 
 
 class LLMChain:
@@ -17,6 +21,10 @@ class LLMChain:
         try:
             return self._primary.generate(prompt, system)
         except Exception as primary_error:
+            # Logged, not swallowed silently: a misconfigured/renamed primary model would
+            # otherwise degrade to the backup permanently with zero visibility that anything
+            # was wrong. The primary -> backup fallback behavior itself is unchanged.
+            logger.warning("Primary LLM provider failed for session %s: %s", session_id, primary_error)
             try:
                 return self._backup.generate(prompt, system)
             except Exception as backup_error:

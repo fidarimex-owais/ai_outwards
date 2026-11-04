@@ -28,6 +28,18 @@ class InvalidCredentials(AppError):
         super().__init__("Invalid username or password")
 
 
+class UnknownField(AppError):
+    def __init__(self, field_key: str):
+        self.field_key = field_key
+        super().__init__(f"Unknown field key: {field_key}")
+
+
+class TooManyLoginAttempts(AppError):
+    def __init__(self, username: str):
+        self.username = username
+        super().__init__(f"Too many failed login attempts for {username}")
+
+
 class AllLLMsFailed(AppError):
     def __init__(self, session_id: str, detail: str = ""):
         self.session_id = session_id

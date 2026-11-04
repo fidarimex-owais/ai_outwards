@@ -27,9 +27,14 @@ export default function ChatPage({ token, username, onLogout }) {
   const [error, setError] = useState("");
   const [language, setLanguage] = useState(sessionStorage.getItem(LANGUAGE_KEY) || null);
   const sessionIdRef = useRef(sessionStorage.getItem(SESSION_KEY));
-  // Only a brand-new entry needs the picker - a resumed session already has a language fixed
-  // server-side for its whole lifetime (see backend/app/features/conversation/repository.py).
-  const [needsLanguage, setNeedsLanguage] = useState(!sessionIdRef.current && !language);
+  const inputBarRef = useRef(null);
+  // Only a resumed session (one with a saved session id) can skip the picker - its language
+  // is already fixed server-side for its whole lifetime (see
+  // backend/app/features/conversation/repository.py). A leftover LANGUAGE_KEY from a
+  // previous, now-completed entry does NOT imply there's a session to resume - without a
+  // session id there is nothing to resume into, so the picker (which starts a fresh session)
+  // is required, not just the previously-chosen language.
+  const [needsLanguage, setNeedsLanguage] = useState(!sessionIdRef.current);
 
   const addMessage = useCallback((role, text) => {
     setMessages((prev) => [...prev, { id: nextMessageId++, role, text }]);
@@ -203,6 +208,7 @@ export default function ChatPage({ token, username, onLogout }) {
   }
 
   async function _startFreshConversation() {
+    inputBarRef.current?.stopRecording();
     setError("");
     setTurn(null);
     setMessages([]);
@@ -300,7 +306,13 @@ export default function ChatPage({ token, username, onLogout }) {
           )}
 
           {(state === "COLLECTING" || state === "CLARIFICATION" || state === undefined) && (
-            <InputBar onSend={handleSend} onTranscribe={handleTranscribe} disabled={busy} language={lang} />
+            <InputBar
+              ref={inputBarRef}
+              onSend={handleSend}
+              onTranscribe={handleTranscribe}
+              disabled={busy}
+              language={lang}
+            />
           )}
         </>
       )}

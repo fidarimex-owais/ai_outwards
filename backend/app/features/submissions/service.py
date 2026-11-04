@@ -73,7 +73,15 @@ class SubmissionService:
             **_with_total(session["answers"]),
             "saved_at": datetime.now(timezone.utc).isoformat(),
         }
-        insert_submission(self._db, submission)  # idempotent - duplicate save is a no-op, not an error
+        try:
+            insert_submission(self._db, submission)  # idempotent - duplicate save is a no-op, not an error
+        except Exception:
+            # Anything other than the idempotent-duplicate case (already handled inside
+            # insert_submission): fall back to AWAITING_CONFIRMATION so the client can retry
+            # /confirm instead of being stuck in SAVING forever (SAVING has no "confirm" event).
+            session["state"] = transition(SessionState.SAVING, "save_failure").value
+            save_session(self._redis, session)
+            raise
 
         session["state"] = transition(SessionState.SAVING, "save_success").value
         save_session(self._redis, session)

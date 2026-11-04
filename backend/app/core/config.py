@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     # Static operator list: "username:bcrypt_hash;username2:bcrypt_hash2". No signup flow -
     # operators are provisioned by editing this value (see app/features/auth/repository.py).
     operator_credentials: str = ""
+    # Login brute-force throttling: after this many failed attempts for a username within the
+    # window, further attempts are rejected (429) until the window elapses.
+    login_rate_limit_attempts: int = 5
+    login_rate_limit_window_seconds: int = 300
 
     # App
     environment: str = "development"
