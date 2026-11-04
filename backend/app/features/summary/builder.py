@@ -2,14 +2,14 @@ from app.features.i18n.translations import normalize_language, section_title, to
 
 SECTIONS = [
     ("Company & Vehicle Details", [
-        "company_name", "vehicle_number", "brand", "line_mark", "weight",
+        "company_name", "vehicle_number", "container_number", "brand", "line_supervisor_name", "weight",
     ]),
     ("Banana Hand & Cluster Quantities", [
         "four_hand", "five_hand", "six_hand", "eight_hand", "cluster", "total",
     ]),
     ("Additional Information", [
-        "remarks", "labor_name", "vehicle_out_time", "vehicle_in_time",
-        "vehicle_for_storage", "vehicle_receiver_name",
+        "labor_name", "driver_name", "cold_storage_name", "cold_storage_supervisor_name",
+        "vehicle_in_time", "vehicle_out_time", "unloading_time",
     ]),
 ]
 

@@ -113,9 +113,9 @@ class ConversationService:
         field_def = get_field(field_key)
         question = field_def.localized_question(language)
 
-        # Optional fields (e.g. Remarks) may legitimately have no spoken answer - accept
-        # blank directly rather than bouncing it off the guardrail's empty-text rejection,
-        # which would otherwise loop forever asking for a non-answer.
+        # An optional field may legitimately have no spoken answer - accept blank directly
+        # rather than bouncing it off the guardrail's empty-text rejection, which would
+        # otherwise loop forever asking for a non-answer.
         if not raw_text.strip() and not field_def.required:
             return self._accept_answer(session, field_def, "", "", current_state)
 

@@ -3,7 +3,7 @@ from enum import Enum
 
 
 class FieldType(str, Enum):
-    TEXT = "text"              # company name, brand, line mark, labor name, remarks, etc.
+    TEXT = "text"              # company name, brand, line supervisor name, labor name, etc.
     NUMBER = "number"           # weight, hand quantities, cluster quantity
     VEHICLE_NUMBER = "vehicle_number"
     TIME = "time"                # vehicle in/out time

@@ -5,8 +5,9 @@ class SubmissionOut(BaseModel):
     session_id: str
     company_name: str
     vehicle_number: str
+    container_number: str
     brand: str
-    line_mark: str
+    line_supervisor_name: str
     weight: float
     four_hand: int
     five_hand: int
@@ -14,12 +15,13 @@ class SubmissionOut(BaseModel):
     eight_hand: int
     cluster: int
     total: int
-    remarks: str
     labor_name: str
-    vehicle_out_time: str
+    driver_name: str
+    cold_storage_name: str
+    cold_storage_supervisor_name: str
     vehicle_in_time: str
-    vehicle_for_storage: str
-    vehicle_receiver_name: str
+    vehicle_out_time: str
+    unloading_time: str
     saved_at: str
 
 

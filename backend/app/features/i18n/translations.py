@@ -31,10 +31,15 @@ FIELD_TEXT: dict[str, dict[str, tuple[str, str]]] = {
         "hi": ("ब्रांड", "ब्रांड क्या है?"),
         "mr": ("ब्रँड", "ब्रँड काय आहे?"),
     },
-    "line_mark": {
-        "en": ("Line Mark", "What is the line mark?"),
-        "hi": ("लाइन मार्क", "लाइन मार्क क्या है?"),
-        "mr": ("लाईन मार्क", "लाईन मार्क काय आहे?"),
+    "container_number": {
+        "en": ("Container Number", "What is the container number?"),
+        "hi": ("कंटेनर नंबर", "कंटेनर नंबर क्या है?"),
+        "mr": ("कंटेनर क्रमांक", "कंटेनर क्रमांक काय आहे?"),
+    },
+    "line_supervisor_name": {
+        "en": ("Line Supervisor Name", "What is the line supervisor's name?"),
+        "hi": ("लाइन सुपरवाइज़र का नाम", "लाइन सुपरवाइज़र का नाम क्या है?"),
+        "mr": ("लाईन सुपरवायझरचे नाव", "लाईन सुपरवायझरचे नाव काय आहे?"),
     },
     "weight": {
         "en": ("Weight", "What is the weight, in kilograms?"),
@@ -66,35 +71,40 @@ FIELD_TEXT: dict[str, dict[str, tuple[str, str]]] = {
         "hi": ("क्लस्टर मात्रा", "क्लस्टर की मात्रा कितनी है?"),
         "mr": ("क्लस्टरचे प्रमाण", "क्लस्टरचे प्रमाण किती आहे?"),
     },
-    "remarks": {
-        "en": ("Remarks", "Any remarks? You can say none."),
-        "hi": ("टिप्पणी", "कोई टिप्पणी? न हो तो 'कुछ नहीं' कहें।"),
-        "mr": ("शेरा", "काही शेरा आहे का? नसल्यास 'नाही' म्हणा."),
-    },
     "labor_name": {
         "en": ("Labor Name", "What is the labor name?"),
         "hi": ("मजदूर का नाम", "मजदूर का नाम क्या है?"),
         "mr": ("मजुराचे नाव", "मजुराचे नाव काय आहे?"),
     },
-    "vehicle_out_time": {
-        "en": ("Vehicle Out Time", "What is the vehicle out time?"),
-        "hi": ("वाहन बाहर जाने का समय", "वाहन बाहर जाने का समय क्या है?"),
-        "mr": ("वाहन बाहेर जाण्याची वेळ", "वाहन बाहेर जाण्याची वेळ काय आहे?"),
+    "driver_name": {
+        "en": ("Driver Name", "What is the driver's name?"),
+        "hi": ("ड्राइवर का नाम", "ड्राइवर का नाम क्या है?"),
+        "mr": ("चालकाचे नाव", "चालकाचे नाव काय आहे?"),
+    },
+    "cold_storage_name": {
+        "en": ("Cold Storage Name", "What is the cold storage name?"),
+        "hi": ("कोल्ड स्टोरेज का नाम", "कोल्ड स्टोरेज का नाम क्या है?"),
+        "mr": ("कोल्ड स्टोरेजचे नाव", "कोल्ड स्टोरेजचे नाव काय आहे?"),
+    },
+    "cold_storage_supervisor_name": {
+        "en": ("Cold Storage Supervisor Name", "What is the cold storage supervisor's name?"),
+        "hi": ("कोल्ड स्टोरेज सुपरवाइज़र का नाम", "कोल्ड स्टोरेज सुपरवाइज़र का नाम क्या है?"),
+        "mr": ("कोल्ड स्टोरेज सुपरवायझरचे नाव", "कोल्ड स्टोरेज सुपरवायझरचे नाव काय आहे?"),
     },
     "vehicle_in_time": {
-        "en": ("Vehicle In Time", "What is the vehicle in time?"),
-        "hi": ("वाहन अंदर आने का समय", "वाहन अंदर आने का समय क्या है?"),
-        "mr": ("वाहन आत येण्याची वेळ", "वाहन आत येण्याची वेळ काय आहे?"),
+        "en": ("Vehicle In Time", "What is the vehicle in time? Please specify AM or PM."),
+        "hi": ("वाहन अंदर आने का समय", "वाहन अंदर आने का समय क्या है? कृपया AM या PM बताएं।"),
+        "mr": ("वाहन आत येण्याची वेळ", "वाहन आत येण्याची वेळ काय आहे? कृपया AM किंवा PM सांगा."),
     },
-    "vehicle_for_storage": {
-        "en": ("Vehicle for Storage", "Is the vehicle for storage?"),
-        "hi": ("वाहन भंडारण के लिए है", "क्या वाहन भंडारण के लिए है?"),
-        "mr": ("वाहन स्टोरेजसाठी आहे का", "वाहन स्टोरेजसाठी आहे का?"),
+    "vehicle_out_time": {
+        "en": ("Vehicle Out Time", "What is the vehicle out time? Please specify AM or PM."),
+        "hi": ("वाहन बाहर जाने का समय", "वाहन बाहर जाने का समय क्या है? कृपया AM या PM बताएं।"),
+        "mr": ("वाहन बाहेर जाण्याची वेळ", "वाहन बाहेर जाण्याची वेळ काय आहे? कृपया AM किंवा PM सांगा."),
     },
-    "vehicle_receiver_name": {
-        "en": ("Vehicle Receiver Name", "Who is the vehicle receiver?"),
-        "hi": ("वाहन प्राप्तकर्ता का नाम", "वाहन प्राप्तकर्ता कौन है?"),
-        "mr": ("वाहन स्वीकारणाऱ्या व्यक्तीचे नाव", "वाहन स्वीकारणारी व्यक्ती कोण आहे?"),
+    "unloading_time": {
+        "en": ("Unloading Time", "What is the unloading time? Please specify AM or PM."),
+        "hi": ("उतराई का समय", "उतराई का समय क्या है? कृपया AM या PM बताएं।"),
+        "mr": ("उतराईची वेळ", "उतराईची वेळ काय आहे? कृपया AM किंवा PM सांगा."),
     },
 }
 

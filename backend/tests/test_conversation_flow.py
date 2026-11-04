@@ -1,24 +1,25 @@
 import json
 
 BATCH1 = {
-    "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
-    "line_mark": "Line Three", "weight": "twelve hundred",
+    "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "container_number": "MSKU1234567",
+    "brand": "Joker Banana", "line_supervisor_name": "Prakash Jadhav", "weight": "twelve hundred",
 }
 BATCH2 = {
     "four_hand": "ten", "five_hand": "twenty", "six_hand": "five", "eight_hand": "three", "cluster": "two",
 }
 BATCH3 = {
-    "remarks": "", "labor_name": "Ramesh Kumar",
+    "labor_name": "Ramesh Kumar", "driver_name": "Mahesh Yadav",
+    "cold_storage_name": "Shivam Cold Storage", "cold_storage_supervisor_name": "Anil Deshmukh",
     "vehicle_in_time": "the truck entered this morning at nine",
     "vehicle_out_time": "the truck left at half past two in the afternoon",
-    "vehicle_for_storage": "yes", "vehicle_receiver_name": "Suresh",
+    "unloading_time": "unloading finished at four in the afternoon",
 }
 
 # Every field now always goes through the LLM (no Python rule/keyword shortcut in front of
 # it), so each distinct raw answer used across these tests needs its own canned response.
 # FakeLLM matches by substring of the prompt; a bare word like "two" or "yes" would also match
 # unrelated boilerplate instruction text that happens to contain that word (e.g. "...or even as
-# two separate sentences", "remarks, yes/no answers"), and a bare quoted name like "Khorale
+# two separate sentences", "yes/no answers"), and a bare quoted name like "Khorale
 # Global" would also match company_name's own "[one of: ...]" closed-set list (which quotes
 # every candidate name verbatim in every prompt, regardless of what was actually said) - so
 # needles here anchor to the trailing `"<text>"\n\n` that only the actual "Spoken answer/
@@ -30,8 +31,9 @@ def _resp(raw_text: str, value) -> tuple[str, str]:
 FIELD_RESPONSES = dict([
     _resp("Khorale Global", "Khorale Global"),
     _resp("MH12AB1234", "MH12AB1234"),
+    _resp("MSKU1234567", "MSKU1234567"),
     _resp("Joker Banana", "Joker Banana"),
-    _resp("Line Three", "Line Three"),
+    _resp("Prakash Jadhav", "Prakash Jadhav"),
     _resp("twelve hundred", 1200),
     _resp("ten", 10),
     _resp("twenty", 20),
@@ -40,10 +42,12 @@ FIELD_RESPONSES = dict([
     _resp("two", 2),
     _resp("Ramesh Kumar", "Ramesh Kumar"),
     _resp("Ramesh", "Ramesh"),
+    _resp("Mahesh Yadav", "Mahesh Yadav"),
+    _resp("Shivam Cold Storage", "Shivam Cold Storage"),
+    _resp("Anil Deshmukh", "Anil Deshmukh"),
     _resp("the truck entered this morning at nine", "09:00"),
     _resp("the truck left at half past two in the afternoon", "14:30"),
-    _resp("yes", "yes"),
-    _resp("Suresh", "Suresh"),
+    _resp("unloading finished at four in the afternoon", "16:00"),
     _resp("MH14XY9999", "MH14XY9999"),
     _resp("none", 0),
 ])
@@ -55,7 +59,7 @@ def _answer(client, session_id, field_key, text):
 
 
 def test_full_happy_path_reaches_awaiting_confirmation(client, fake_llm):
-    # All 16 fields are shown and answered in a single "batch" now - no separate rounds.
+    # All 18 fields are shown and answered in a single "batch" now - no separate rounds.
     fake_llm(FIELD_RESPONSES)
 
     r = client.post("/sessions")
@@ -63,7 +67,7 @@ def test_full_happy_path_reaches_awaiting_confirmation(client, fake_llm):
     data = r.json()
     session_id = data["session_id"]
     assert data["state"] == "COLLECTING"
-    assert len(data["questions"]) == 16  # the whole form, shown at once
+    assert len(data["questions"]) == 18  # the whole form, shown at once
     assert data["next_field_key"] == "company_name"  # first field overall
     assert data["answered_field_keys"] == []
 
@@ -71,7 +75,7 @@ def test_full_happy_path_reaches_awaiting_confirmation(client, fake_llm):
     data = r.json()
     assert data["next_field_key"] == "vehicle_number"
     assert data["answered_field_keys"] == ["company_name"]
-    assert len(data["questions"]) == 15  # "questions" is always what's still remaining, not the whole form
+    assert len(data["questions"]) == 17  # "questions" is always what's still remaining, not the whole form
 
     last = data
     for key, text in list(BATCH1.items())[1:] + list(BATCH2.items()) + list(BATCH3.items()):
@@ -116,6 +120,28 @@ def test_clarification_loop_on_invalid_answer(client, fake_llm):
     assert r.json()["state"] == "COLLECTING"
 
 
+def test_time_field_without_am_pm_is_treated_as_ambiguous(client, fake_llm):
+    # Regression test for the AM/PM requirement: a time answer with no AM/PM (or equivalent
+    # period-of-day cue) must not be guessed at - the LLM is instructed to mark it ambiguous
+    # (see extraction/prompts.py's normalization rule), which this test models directly via
+    # the fake LLM's canned response, and the clarification loop must then re-ask rather than
+    # silently storing a guessed value.
+    fake_llm({'"the truck entered at nine"\n\n': '{"value": null, "ambiguous": true}'})
+    session_id = client.post("/sessions").json()["session_id"]
+
+    r = _answer(client, session_id, "vehicle_in_time", "the truck entered at nine")
+    data = r.json()
+    assert data["state"] == "CLARIFICATION"
+    assert data["clarification_prompt"] is not None
+    assert data["next_field_key"] == "vehicle_in_time"
+
+    fake_llm(dict([_resp("the truck entered at nine AM", "09:00")]))
+    r = _answer(client, session_id, "vehicle_in_time", "the truck entered at nine AM")
+    data = r.json()
+    assert data["state"] == "COLLECTING"
+    assert "vehicle_in_time" in data["answered_field_keys"]
+
+
 def test_session_recovery_mid_batch_shows_correct_next_field(client, fake_llm):
     fake_llm(dict([_resp("Khorale Global", "Khorale Global"), _resp("MH12AB1234", "MH12AB1234")]))
     session_id = client.post("/sessions").json()["session_id"]
@@ -127,7 +153,7 @@ def test_session_recovery_mid_batch_shows_correct_next_field(client, fake_llm):
     r = client.get(f"/sessions/{session_id}")
     data = r.json()
     assert data["state"] == "COLLECTING"
-    assert data["next_field_key"] == "brand"  # third field of batch 1, correctly resumed
+    assert data["next_field_key"] == "container_number"  # third field of batch 1, correctly resumed
     assert data["answered_field_keys"] == ["company_name", "vehicle_number"]
 
 
@@ -183,10 +209,11 @@ def test_time_sequence_validation_rejects_out_before_in(client, fake_llm):
         _answer(client, session_id, key, text)
     for key, text in BATCH2.items():
         _answer(client, session_id, key, text)
-    _answer(client, session_id, "remarks", "")
     _answer(client, session_id, "labor_name", "Ramesh")
-    _answer(client, session_id, "vehicle_for_storage", "yes")
-    _answer(client, session_id, "vehicle_receiver_name", "Suresh")
+    _answer(client, session_id, "driver_name", "Mahesh Yadav")
+    _answer(client, session_id, "cold_storage_name", "Shivam Cold Storage")
+    _answer(client, session_id, "cold_storage_supervisor_name", "Anil Deshmukh")
+    _answer(client, session_id, "unloading_time", "unloading finished at four in the afternoon")
 
     _answer(client, session_id, "vehicle_in_time", "the truck entered at two in the afternoon")
     r = _answer(client, session_id, "vehicle_out_time", "the truck left at five in the morning")

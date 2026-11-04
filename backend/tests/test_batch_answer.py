@@ -2,19 +2,19 @@ import json
 
 from tests.test_conversation_flow import BATCH1, BATCH2, BATCH3, FIELD_RESPONSES
 
-ALL_16_KEYS = [
-    "company_name", "vehicle_number", "brand", "line_mark", "weight",
+ALL_FIELD_KEYS = [
+    "company_name", "vehicle_number", "container_number", "brand", "line_supervisor_name", "weight",
     "four_hand", "five_hand", "six_hand", "eight_hand", "cluster",
-    "remarks", "labor_name", "vehicle_out_time", "vehicle_in_time",
-    "vehicle_for_storage", "vehicle_receiver_name",
+    "labor_name", "driver_name", "cold_storage_name", "cold_storage_supervisor_name",
+    "vehicle_in_time", "vehicle_out_time", "unloading_time",
 ]
 
 
 def _fake_batch_response(overrides: dict) -> str:
-    """Builds a full-form (all 16 fields) JSON response, defaulting every field not in
+    """Builds a full-form (all 18 fields) JSON response, defaulting every field not in
     overrides to ambiguous/null."""
     data = {}
-    for key in ALL_16_KEYS:
+    for key in ALL_FIELD_KEYS:
         if key in overrides:
             data[key] = {"value": overrides[key], "ambiguous": False}
         else:
@@ -23,24 +23,27 @@ def _fake_batch_response(overrides: dict) -> str:
 
 
 def test_full_batch_answered_in_one_call_reaches_awaiting_confirmation(client, fake_llm):
-    # The whole 16-field form, answered from a single recording - this is the actual
+    # The whole 18-field form, answered from a single recording - this is the actual
     # feature: one long utterance covering everything, one LLM call, straight to summary.
     fake_llm({
         "company": _fake_batch_response({
-            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
-            "line_mark": "Line Three", "weight": 1200,
+            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "container_number": "MSKU1234567",
+            "brand": "Joker Banana", "line_supervisor_name": "Prakash Jadhav", "weight": 1200,
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
-            "remarks": "", "labor_name": "Ramesh Kumar",
-            "vehicle_out_time": "14:30", "vehicle_in_time": "09:00",
-            "vehicle_for_storage": "yes", "vehicle_receiver_name": "Suresh",
+            "labor_name": "Ramesh Kumar", "driver_name": "Mahesh Yadav",
+            "cold_storage_name": "Shivam Cold Storage", "cold_storage_supervisor_name": "Anil Deshmukh",
+            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "16:00",
         }),
     })
     session_id = client.post("/sessions").json()["session_id"]
 
     r = client.post(f"/sessions/{session_id}/answer-batch", json={
-        "text": "company Khorale Global, vehicle MH12AB1234, brand Joker Banana, line mark Line Three, weight twelve hundred, "
+        "text": "company Khorale Global, vehicle MH12AB1234, container MSKU1234567, brand Joker Banana, "
+                "line supervisor Prakash Jadhav, weight twelve hundred, "
                 "four hand ten, five hand twenty, six hand five, eight hand three, cluster two, "
-                "no remarks, labor Ramesh Kumar, out time half past two, in time nine AM, for storage yes, receiver Suresh"
+                "labor Ramesh Kumar, driver Mahesh Yadav, cold storage Shivam Cold Storage, "
+                "cold storage supervisor Anil Deshmukh, in time nine AM, out time half past two PM, "
+                "unloading time four PM"
     })
     data = r.json()
     assert data["state"] == "AWAITING_CONFIRMATION"
@@ -53,19 +56,19 @@ def test_partial_batch_regroups_just_the_missed_ones(client, fake_llm):
     # weight is "ambiguous" in the fake response - everything else succeeds
     fake_llm({
         "company": _fake_batch_response({
-            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
-            "line_mark": "Line Three",
+            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "container_number": "MSKU1234567",
+            "brand": "Joker Banana", "line_supervisor_name": "Prakash Jadhav",
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
-            "remarks": "", "labor_name": "Ramesh Kumar",
-            "vehicle_out_time": "14:30", "vehicle_in_time": "09:00",
-            "vehicle_for_storage": "yes", "vehicle_receiver_name": "Suresh",
+            "labor_name": "Ramesh Kumar", "driver_name": "Mahesh Yadav",
+            "cold_storage_name": "Shivam Cold Storage", "cold_storage_supervisor_name": "Anil Deshmukh",
+            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "16:00",
         }),
     })
     session_id = client.post("/sessions").json()["session_id"]
 
     r = client.post(f"/sessions/{session_id}/answer-batch", json={
-        "text": "company Khorale Global vehicle MH12AB1234 brand Joker Banana line mark Line Three, didn't catch the weight, "
-                "and everything else"
+        "text": "company Khorale Global vehicle MH12AB1234 container MSKU1234567 brand Joker Banana "
+                "line supervisor Prakash Jadhav, didn't catch the weight, and everything else"
     })
     data = r.json()
     assert data["state"] == "COLLECTING"
@@ -83,19 +86,19 @@ def test_partial_batch_regroups_just_the_missed_ones(client, fake_llm):
     assert r.json()["state"] == "AWAITING_CONFIRMATION"  # that was the last field
 
 
-def test_three_missed_fields_grouped_into_one_followup_and_resolved_together(client, fake_llm):
-    """The exact scenario from the spec: miss three fields in the first recording, they get
-    grouped into one follow-up message (not asked one at a time), and a second recording
-    answering all three together resolves all of them in one call."""
+def test_two_missed_fields_grouped_into_one_followup_and_resolved_together(client, fake_llm):
+    """Miss a couple of fields in the first recording, they get grouped into one follow-up
+    message (not asked one at a time), and a second recording answering both together
+    resolves them in one call."""
     fake_llm({
         "company": _fake_batch_response({
-            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
-            "line_mark": "Line Three", "weight": 1200,
+            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "container_number": "MSKU1234567",
+            "brand": "Joker Banana", "line_supervisor_name": "Prakash Jadhav", "weight": 1200,
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "labor_name": "Ramesh Kumar",
-            "vehicle_out_time": "14:30", "vehicle_in_time": "09:00",
-            "vehicle_for_storage": "yes",
-            # remarks, vehicle_receiver_name deliberately left out -> ambiguous/missing
+            "cold_storage_name": "Shivam Cold Storage",
+            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "16:00",
+            # driver_name, cold_storage_supervisor_name deliberately left out -> ambiguous/missing
         }),
     })
     session_id = client.post("/sessions").json()["session_id"]
@@ -104,17 +107,17 @@ def test_three_missed_fields_grouped_into_one_followup_and_resolved_together(cli
     data = r.json()
     assert data["state"] == "COLLECTING"
     missed_keys = {q["key"] for q in data["questions"]}
-    assert missed_keys == {"remarks", "vehicle_receiver_name"}  # both grouped together, in one message
-    assert len(data["answered_field_keys"]) == 14
+    assert missed_keys == {"driver_name", "cold_storage_supervisor_name"}  # both grouped together, in one message
+    assert len(data["answered_field_keys"]) == 16
 
     # second recording answers both remaining ones together, in one call
     fake_llm({
-        "none": _fake_batch_response({"remarks": "", "vehicle_receiver_name": "Suresh"}),
+        "none": _fake_batch_response({"driver_name": "Mahesh Yadav", "cold_storage_supervisor_name": "Anil Deshmukh"}),
     })
-    r = client.post(f"/sessions/{session_id}/answer-batch", json={"text": "none for remarks, receiver is Suresh"})
+    r = client.post(f"/sessions/{session_id}/answer-batch", json={"text": "driver is Mahesh Yadav, supervisor is Anil Deshmukh"})
     data = r.json()
     assert data["state"] == "AWAITING_CONFIRMATION"
-    assert "Suresh" in data["summary"]
+    assert "Mahesh Yadav" in data["summary"]
 
 
 def test_batch_answer_accepted_from_clarification_state(client, fake_llm):
@@ -124,12 +127,12 @@ def test_batch_answer_accepted_from_clarification_state(client, fake_llm):
     of COLLECTING for answer-batch purposes, not a dead end."""
     fake_llm({
         "company": _fake_batch_response({
-            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "brand": "Joker Banana",
-            "line_mark": "Line Three", "weight": 1200,
+            "company_name": "Khorale Global", "vehicle_number": "MH12AB1234", "container_number": "MSKU1234567",
+            "brand": "Joker Banana", "line_supervisor_name": "Prakash Jadhav", "weight": 1200,
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
-            "remarks": "", "labor_name": "Ramesh Kumar",
-            "vehicle_out_time": "14:30", "vehicle_in_time": "09:00",
-            "vehicle_for_storage": "yes", "vehicle_receiver_name": "Suresh",
+            "labor_name": "Ramesh Kumar", "driver_name": "Mahesh Yadav",
+            "cold_storage_name": "Shivam Cold Storage", "cold_storage_supervisor_name": "Anil Deshmukh",
+            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "16:00",
         }),
     })
     session_id = client.post("/sessions").json()["session_id"]
@@ -140,14 +143,17 @@ def test_batch_answer_accepted_from_clarification_state(client, fake_llm):
     # the resume path (GET) must show the full grouped list, not just the one pending field
     r = client.get(f"/sessions/{session_id}")
     data = r.json()
-    assert len(data["questions"]) == 16
+    assert len(data["questions"]) == 18
     assert data["next_field_key"] == "company_name"
 
     # and the batch endpoint must still accept a recording from this state
     r = client.post(f"/sessions/{session_id}/answer-batch", json={
-        "text": "company Khorale Global, vehicle MH12AB1234, brand Joker Banana, line mark Line Three, weight twelve hundred, "
+        "text": "company Khorale Global, vehicle MH12AB1234, container MSKU1234567, brand Joker Banana, "
+                "line supervisor Prakash Jadhav, weight twelve hundred, "
                 "four hand ten, five hand twenty, six hand five, eight hand three, cluster two, "
-                "no remarks, labor Ramesh Kumar, out time half past two, in time nine AM, for storage yes, receiver Suresh"
+                "labor Ramesh Kumar, driver Mahesh Yadav, cold storage Shivam Cold Storage, "
+                "cold storage supervisor Anil Deshmukh, in time nine AM, out time half past two PM, "
+                "unloading time four PM"
     })
     assert r.json()["state"] == "AWAITING_CONFIRMATION"
 
