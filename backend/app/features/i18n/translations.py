@@ -133,7 +133,7 @@ UI_TEXT: dict[str, dict[str, str]] = {
     "intro": {
         "en": "Please answer the following questions - you can type or record them all together:",
         "hi": "कृपया निम्नलिखित प्रश्नों के उत्तर दें - आप सभी उत्तर एक साथ टाइप या रिकॉर्ड कर सकते हैं:",
-        "mr": "कृपया खालील प्रश्नांची उत्तरे द्या. तुम्ही सर्व प्रश्नांची उत्तरे एकत्र टाइप करू शकता किंवा बोलून रेकॉर्ड करू शकता.",
+        "mr": "कृपया खालील प्रश्नांची उत्तरे द्या. तुम्ही सर्व प्रश्नांची उत्तरे एकत्र टाइप करू शकता किंवा बोलून रेकॉर्ड करू शकता:",
     },
     "still_need": {
         "en": "I still need a few things - please answer these together:",
@@ -143,7 +143,7 @@ UI_TEXT: dict[str, dict[str, str]] = {
     "confirm_header": {
         "en": "Please confirm the following details:",
         "hi": "कृपया निम्नलिखित विवरण की पुष्टि करें:",
-        "mr": "कृपया खालील माहिती तपासून खात्री करा.",
+        "mr": "कृपया खालील माहिती तपासून खात्री करा:",
     },
     "sorry_not_catch": {
         "en": "Sorry, I didn't catch that. {question}",
