@@ -32,7 +32,7 @@ def test_full_batch_answered_in_one_call_reaches_awaiting_confirmation(client, f
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "labor_name": "Ramesh Kumar", "driver_name": "Mahesh Yadav",
             "cold_storage_name": "Shivam Cold Storage", "cold_storage_supervisor_name": "Anil Deshmukh",
-            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "16:00",
+            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "12:00",
         }),
     })
     session_id = client.post("/sessions").json()["session_id"]
@@ -61,7 +61,7 @@ def test_partial_batch_regroups_just_the_missed_ones(client, fake_llm):
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "labor_name": "Ramesh Kumar", "driver_name": "Mahesh Yadav",
             "cold_storage_name": "Shivam Cold Storage", "cold_storage_supervisor_name": "Anil Deshmukh",
-            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "16:00",
+            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "12:00",
         }),
     })
     session_id = client.post("/sessions").json()["session_id"]
@@ -97,7 +97,7 @@ def test_two_missed_fields_grouped_into_one_followup_and_resolved_together(clien
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "labor_name": "Ramesh Kumar",
             "cold_storage_name": "Shivam Cold Storage",
-            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "16:00",
+            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "12:00",
             # driver_name, cold_storage_supervisor_name deliberately left out -> ambiguous/missing
         }),
     })
@@ -132,7 +132,7 @@ def test_batch_answer_accepted_from_clarification_state(client, fake_llm):
             "four_hand": 10, "five_hand": 20, "six_hand": 5, "eight_hand": 3, "cluster": 2,
             "labor_name": "Ramesh Kumar", "driver_name": "Mahesh Yadav",
             "cold_storage_name": "Shivam Cold Storage", "cold_storage_supervisor_name": "Anil Deshmukh",
-            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "16:00",
+            "vehicle_in_time": "09:00", "vehicle_out_time": "14:30", "unloading_time": "12:00",
         }),
     })
     session_id = client.post("/sessions").json()["session_id"]

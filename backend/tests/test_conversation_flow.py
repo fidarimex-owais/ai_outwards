@@ -47,7 +47,11 @@ FIELD_RESPONSES = dict([
     _resp("Anil Deshmukh", "Anil Deshmukh"),
     _resp("the truck entered this morning at nine", "09:00"),
     _resp("the truck left at half past two in the afternoon", "14:30"),
-    _resp("unloading finished at four in the afternoon", "16:00"),
+    # 14:15 is deliberately between both: BATCH3's default in/out (09:00/14:30) and the
+    # corrected in/out used by test_time_sequence_validation_rejects_out_before_in (14:00/16:00)
+    # - both rely on this same canned value now that unloading_time must sit strictly between
+    # vehicle_in_time and vehicle_out_time.
+    _resp("unloading finished at four in the afternoon", "14:15"),
     _resp("MH14XY9999", "MH14XY9999"),
     _resp("none", 0),
 ])
@@ -225,6 +229,40 @@ def test_time_sequence_validation_rejects_out_before_in(client, fake_llm):
     assert data["next_field_key"] == "vehicle_out_time"
 
     r = _answer(client, session_id, "vehicle_out_time", "the truck left at four in the afternoon")
+    assert r.json()["state"] == "AWAITING_CONFIRMATION"
+
+
+def test_unloading_time_must_fall_strictly_between_in_and_out_time(client, fake_llm):
+    fake_llm({
+        **FIELD_RESPONSES,
+        "unloading happened at five in the evening": '{"value": "17:00", "ambiguous": false}',
+        "unloading happened around noon": '{"value": "12:00", "ambiguous": false}',
+    })
+    session_id = client.post("/sessions").json()["session_id"]
+
+    for key, text in BATCH1.items():
+        _answer(client, session_id, key, text)
+    for key, text in BATCH2.items():
+        _answer(client, session_id, key, text)
+    _answer(client, session_id, "labor_name", "Ramesh")
+    _answer(client, session_id, "driver_name", "Mahesh Yadav")
+    _answer(client, session_id, "cold_storage_name", "Shivam Cold Storage")
+    _answer(client, session_id, "cold_storage_supervisor_name", "Anil Deshmukh")
+    # vehicle_in_time=09:00, vehicle_out_time=14:30 (BATCH3's defaults via FIELD_RESPONSES) -
+    # answered before unloading_time so the all-fields-collected check (and this rule) only
+    # fires once unloading_time itself is submitted.
+    _answer(client, session_id, "vehicle_in_time", "the truck entered this morning at nine")
+    _answer(client, session_id, "vehicle_out_time", "the truck left at half past two in the afternoon")
+
+    # 17:00 is after vehicle_out_time (14:30) - rejected, not between in/out.
+    r = _answer(client, session_id, "unloading_time", "unloading happened at five in the evening")
+    data = r.json()
+    assert data["state"] == "COLLECTING"
+    assert data["clarification_prompt"] is not None
+    assert data["next_field_key"] == "unloading_time"
+
+    # 12:00 is strictly between 09:00 and 14:30 - accepted.
+    r = _answer(client, session_id, "unloading_time", "unloading happened around noon")
     assert r.json()["state"] == "AWAITING_CONFIRMATION"
 
 

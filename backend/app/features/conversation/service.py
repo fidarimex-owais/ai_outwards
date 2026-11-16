@@ -280,6 +280,30 @@ class ConversationService:
                 )
                 return response
 
+        # unloading_time must fall strictly between vehicle_in_time and vehicle_out_time -
+        # only checked once the in/out pair above is itself valid, so this never runs against
+        # an out-of-order in/out pair that's about to be re-asked anyway.
+        if "vehicle_in_time" in answers and "vehicle_out_time" in answers and "unloading_time" in answers:
+            in_label = get_field("vehicle_in_time").localized_label(language)
+            out_label = get_field("vehicle_out_time").localized_label(language)
+            unloading_label = get_field("unloading_time").localized_label(language)
+            after_in = validate_time_sequence(
+                answers["vehicle_in_time"], answers["unloading_time"], in_label, unloading_label, language,
+            )
+            before_out = validate_time_sequence(
+                answers["unloading_time"], answers["vehicle_out_time"], unloading_label, out_label, language,
+            )
+            unloading_seq = after_in if not after_in.valid else before_out
+            if not unloading_seq.valid:
+                del session["answers"]["unloading_time"]
+                session["display_answers"].pop("unloading_time", None)
+                save_session(self._redis, session)
+                response = _collecting_response(session)
+                response.clarification_prompt = (
+                    f"{unloading_seq.error}. {get_field('unloading_time').localized_question(language)}"
+                )
+                return response
+
         session["state"] = transition(current_state, "all_fields_collected").value
         save_session(self._redis, session)
         return self._response_for_session(session)
