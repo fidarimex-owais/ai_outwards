@@ -16,6 +16,15 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     backup_llm_provider: str = "groq"
     backup_llm_api_key: str = ""
+    # Which provider LLMChain tries first - "gemini" or "groq"; the other one is always the
+    # automatic fallback. Falls back to "gemini" if missing or set to anything else - see
+    # app/features/llm/chain.py's _normalized_primary_provider().
+    llm_primary_provider: str = "gemini"
+    # Controls which Gemini model GeminiLLMClient calls (read once at startup, from the
+    # GEMINI_MODEL env var - changing it requires a backend restart, same as every other
+    # setting here). Default is "gemini-3.1-flash-lite" (500 requests/day free tier, vs.
+    # "gemini-3.8-flash"'s 20/day) - see app/features/llm/gemini.py's model-resolution order.
+    gemini_model: str = "gemini-3.1-flash-lite"
 
     # Speech-to-Text: "groq" (cloud Whisper, far more accurate) or "whisper" (local
     # faster-whisper, no network/API key needed but noticeably less accurate)

@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 MIN_LENGTH = 1
-MAX_LENGTH = 500
+MAX_LENGTH = 1000
 
 # Pure Python rules (MSI level 1) — no LLM call needed to catch these.
 _PROMPT_INJECTION_PATTERNS = [

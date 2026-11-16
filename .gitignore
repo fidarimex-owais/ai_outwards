@@ -6,6 +6,7 @@ backend/.env.docker
 
 # Python
 .venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo
