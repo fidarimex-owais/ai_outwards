@@ -189,6 +189,11 @@ VALIDATION_TEXT: dict[str, dict[str, str]] = {
         "hi": "{label} इनमें से एक होना चाहिए: {options}",
         "mr": "{label} यापैकी एक असावे: {options}",
     },
+    "must_be_text": {
+        "en": "{label} must be plain text",
+        "hi": "{label} सादा पाठ होना चाहिए",
+        "mr": "{label} साधा मजकूर असावा",
+    },
     "must_be_number": {
         "en": "{label} must be a number",
         "hi": "{label} एक संख्या होनी चाहिए",

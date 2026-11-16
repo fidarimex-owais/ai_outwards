@@ -1,5 +1,5 @@
 """Diagnostic script, NOT part of the app - probes whether the two Gemini Lite model
-candidates (being considered as a replacement for the rate-limited default,
+candidates (considered as a replacement for the rate-limited original default,
 "gemini-3.8-flash") actually work with this app's production call shape (same timeout,
 max_output_tokens, thinking_config, and usage logging as GeminiLLMClient.generate()).
 
@@ -35,6 +35,10 @@ from app.features.llm.gemini import GeminiLLMClient  # noqa: E402
 
 # This = the two candidate model ids approved for probing, and the fixed dummy transcript -
 # no real user data, matching what was approved before this script was written.
+# "gemini-3.1-flash-lite" is now the app's default (settings.gemini_model) - it passed this
+# probe live. "gemini-3.5-flash-lite" failed live with a 400 Bad Request (ClientError) under
+# the same thinking_config(thinking_budget=0) call shape, and is kept here only as a
+# reference/comparison candidate, not in use anywhere.
 CANDIDATE_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
 DUMMY_TRANSCRIPT = (
     "company is Test Traders, vehicle MH12AB1234, brand Test, four hand ten, five hand twenty, "

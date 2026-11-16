@@ -44,6 +44,20 @@ def test_validate_text_no_allowed_values_accepts_anything():
     assert result.valid and result.value == "Any Free Text At All"
 
 
+def test_validate_text_rejects_list_value_instead_of_stringifying_it():
+    # Regression test: a malformed LLM response for an open free-text field (e.g. labor_name)
+    # used to be silently accepted as str(["Ravi"]) == "['Ravi']" - corrupted data, no error.
+    result = validate_text(["Ravi"], "Labor Name")
+    assert not result.valid
+    assert result.value is None
+
+
+def test_validate_text_rejects_dict_value_instead_of_stringifying_it():
+    result = validate_text({"value": "394786"}, "Container Number")
+    assert not result.valid
+    assert result.value is None
+
+
 def test_validate_number_coercion_and_normalization():
     assert validate_number(42, "Four-Hand").value == 42
     assert validate_number("42", "Four-Hand").value == 42

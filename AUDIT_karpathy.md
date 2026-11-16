@@ -1,5 +1,9 @@
 # Karpathy-Guidelines Audit — Phase A (Read-Only)
 
+**JWT_SECRET enforcement deferred by user; placeholder still in use; do not deploy or expose the backend until fixed.**
+
+**OPEN: Upload cap only limits processing, not receipt: UploadFile is already parsed before the handler runs. Real protection needs a proxy limit (e.g. client_max_body_size) or an ASGI middleware that counts bytes while streaming.**
+
 Scope: `backend/app/`, `backend/tests/`, `frontend/src/`. No files changed. No live Gemini/Groq calls made.
 
 Baseline held while auditing: backend 116/117 pytest (1 pre-existing env-dependent failure, see GOAL-DRIVEN #1 below), frontend 15/15 vitest, lint clean, build clean.

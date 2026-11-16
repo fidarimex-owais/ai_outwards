@@ -18,6 +18,13 @@ def validate_text(
     value, field_label: str, language: str = "en", required: bool = True, max_length: int = 200,
     allowed_values: list[str] | None = None,
 ) -> ValidationResult:
+    # A list/dict here means the LLM returned a non-scalar value for a text field. str(value)
+    # never raises on these, so without this check they'd be silently stringified (e.g.
+    # ["Ravi"] -> "['Ravi']") and stored as corrupted data instead of being caught - reject
+    # them explicitly so the caller re-asks the question instead.
+    if isinstance(value, (list, dict)):
+        return ValidationResult(valid=False, error=validation_text("must_be_text", language, label=field_label))
+
     if value is None:
         stripped = ""
     else:
