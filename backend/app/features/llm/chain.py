@@ -27,14 +27,19 @@ def _status_code(error: Exception) -> int | None:
 
 def _is_retryable(error: Exception) -> bool:
     """True if this failure is the kind LLMChain should fall back to the other provider for:
-    a rate limit (429), a server-side error (5xx), or a timeout. False for any other 4xx - an
-    invalid request (400) or an authentication failure (401/403) means the request or
-    credentials are themselves broken, which trying a different provider's account won't fix.
-    Anything unclassified (network failures, unexpected SDK errors) defaults to retryable,
-    matching this chain's original broad fallback behavior for errors it doesn't recognize."""
+    a rate limit (429), a server-side error (5xx), a timeout, or a 400 Bad Request. The 400
+    case is deliberately retried too (unlike a typical "invalid request, don't retry" rule):
+    in practice a 400 from this app's primary provider has meant a misconfiguration (e.g. an
+    invalid model id) rather than a per-request problem, and falling back keeps the user's
+    turn working rather than failing it outright - at the cost of being able to mask a broken
+    primary, which is why LLMChain.generate() logs this specific case at ERROR, not just
+    WARNING (see below). False only for an authentication failure (401/403) - bad credentials
+    won't be fixed by switching to a different provider's account either way. Anything
+    unclassified (network failures, unexpected SDK errors) defaults to retryable, matching
+    this chain's original broad fallback behavior for errors it doesn't recognize."""
     code = _status_code(error)
     if code is not None:
-        return code == 429 or 500 <= code < 600
+        return code == 400 or code == 429 or 500 <= code < 600
     if isinstance(error, httpx.TimeoutException):
         return True
     return True
@@ -51,8 +56,9 @@ def _normalized_primary_provider() -> str:
 
 class LLMChain:
     """Tries the primary provider first, falls back to the other provider on a retryable
-    failure (rate limit, server error, or timeout). A non-retryable failure (invalid request,
-    auth) or a failure of both providers raises AllLLMsFailed, so the caller
+    failure (rate limit, server error, timeout, or a 400 Bad Request from the primary - see
+    _is_retryable for why 400 is included). A non-retryable failure (an auth failure, 401/403)
+    or a failure of both providers raises AllLLMsFailed, so the caller
     (conversation/service.py) can pause the session and tell the user to retry shortly, per
     the HLD - that contract is the same regardless of which failure path got there."""
 
@@ -74,9 +80,9 @@ class LLMChain:
             status = _status_code(primary_error)
 
             if not _is_retryable(primary_error):
-                # Deliberately not attempting the backup here: a bad request or bad
-                # credentials on this provider won't be fixed by switching accounts, so
-                # there's nothing to gain from burning the other provider's quota too.
+                # Deliberately not attempting the backup here: an authentication failure
+                # (401/403) on this provider won't be fixed by switching accounts, so there's
+                # nothing to gain from burning the other provider's quota too.
                 logger.warning(
                     "Primary LLM provider (%s) failed with a non-retryable error for session %s "
                     "(%s, status=%s) - not falling back to %s.",
@@ -87,10 +93,24 @@ class LLMChain:
                     detail=f"primary ({self._primary_name}) failed with a non-retryable error: {error_kind}",
                 ) from primary_error
 
-            logger.warning(
-                "Primary LLM provider (%s) failed for session %s (%s, status=%s) - falling back to %s.",
-                self._primary_name, session_id, error_kind, status, self._backup_name,
-            )
+            if status == 400:
+                # Loud on purpose (ERROR, not WARNING): a 400 is retried per _is_retryable's
+                # reasoning above, but that choice trades user-facing reliability now for the
+                # risk of masking a broken primary later (it'll keep "working" via the backup
+                # until the backup fails too) - this line is what makes that tradeoff visible
+                # instead of silent. Names only the status code and provider names - never the
+                # prompt, the transcript, or any key.
+                logger.error(
+                    "Primary LLM provider (%s) returned status=400 (Bad Request) for session %s - "
+                    "falling back to %s. A 400 often means the primary is misconfigured (e.g. an "
+                    "invalid model id) - check its configuration if this recurs.",
+                    self._primary_name, session_id, self._backup_name,
+                )
+            else:
+                logger.warning(
+                    "Primary LLM provider (%s) failed for session %s (%s, status=%s) - falling back to %s.",
+                    self._primary_name, session_id, error_kind, status, self._backup_name,
+                )
             try:
                 result = self._backup.generate(prompt, system)
                 logger.info(

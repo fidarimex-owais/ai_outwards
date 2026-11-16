@@ -155,6 +155,11 @@ UI_TEXT: dict[str, dict[str, str]] = {
         "hi": "माफ़ कीजिए, मुझे समझ नहीं आया। कृपया फिर से प्रयास करें।",
         "mr": "माफ करा, मला ते समजले नाही. कृपया पुन्हा प्रयत्न करा.",
     },
+    "answer_too_long": {
+        "en": "Your answer is too long. Please give a shorter answer or split it into a few parts.",
+        "hi": "आपका उत्तर बहुत लंबा है। कृपया छोटा उत्तर दें या उसे कुछ भागों में बाँट दें।",
+        "mr": "तुमचे उत्तर खूप लांब आहे. कृपया लहान उत्तर द्या किंवा ते काही भागांत विभागा.",
+    },
     "unclear": {
         "en": "I couldn't understand that clearly. {question}",
         "hi": "मुझे यह स्पष्ट रूप से समझ नहीं आया। {question}",

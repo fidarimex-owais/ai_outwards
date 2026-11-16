@@ -107,9 +107,10 @@ class SubmissionService:
         guard = check_input(raw_text)
         if not guard.allowed:
             save_session(self._redis, session)
+            message_key = "answer_too_long" if guard.reason == "too_long" else "sorry_try_again"
             return TurnResponse(
                 session_id=session_id, state=session["state"], language=language,
-                clarification_prompt=ui_text("sorry_try_again", language),
+                clarification_prompt=ui_text(message_key, language),
             )
 
         fields = [

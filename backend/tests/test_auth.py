@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 
 from app.core.config import settings
@@ -7,18 +9,38 @@ from app.core.security import hash_password
 from app.features.auth.service import login
 
 
-def _set_test_operator(monkeypatch, username="pytest-operator", password="pytest-pass-123"):
+def _set_test_operator(monkeypatch, username: str | None = None, password="pytest-pass-123"):
+    # A fresh, unique username per call (not a fixed literal) so a failed-login attempt this
+    # test causes in real Redis can never collide with the same test's run in a previous
+    # pytest invocation - the actual key, login_attempts:{client_ip}:{username} (see
+    # app/features/auth/service.py), is scoped by username, so reusing one across runs is
+    # what let attempts silently accumulate until the rate limit tripped for real.
+    if username is None:
+        username = f"pytest-operator-{uuid.uuid4().hex[:8]}"
     test_hash = hash_password(password)
     monkeypatch.setattr(settings, "operator_credentials", f"{username}:{test_hash}")
     return username, password
 
 
 def _cleanup_attempts(username: str) -> None:
-    # The rate-limit key is now scoped by (client_ip, username) - clean up by pattern rather
-    # than assuming a single fixed IP in the key.
+    # The rate-limit key is login_attempts:{client_ip}:{username} - clean up by pattern
+    # (wildcard only on the IP segment) so this only ever deletes this one username's own
+    # keys, never any other username's.
     redis_client = get_redis()
     for key in redis_client.keys(f"login_attempts:*:{username}"):
         redis_client.delete(key)
+
+
+@pytest.fixture
+def _cleanup_usernames():
+    """Tracks every username a test registers with it, and deletes that username's
+    login_attempts:*:<username> Redis keys in fixture teardown (runs whether the test passes
+    or fails) - same key pattern/cleanup as _cleanup_attempts(), just via a fixture instead of
+    an inline try/finally, for tests that weren't already wrapped in one."""
+    usernames: list[str] = []
+    yield usernames
+    for username in usernames:
+        _cleanup_attempts(username)
 
 
 def test_unauthenticated_request_rejected(unauthed_client):
@@ -26,15 +48,18 @@ def test_unauthenticated_request_rejected(unauthed_client):
     assert r.status_code == 401
 
 
-def test_login_wrong_password_rejected(unauthed_client, monkeypatch):
+def test_login_wrong_password_rejected(unauthed_client, monkeypatch, _cleanup_usernames):
     username, _ = _set_test_operator(monkeypatch)
+    _cleanup_usernames.append(username)
     r = unauthed_client.post("/auth/login", data={"username": username, "password": "wrong"})
     assert r.status_code == 401
 
 
-def test_login_unknown_user_rejected(unauthed_client, monkeypatch):
+def test_login_unknown_user_rejected(unauthed_client, monkeypatch, _cleanup_usernames):
     _set_test_operator(monkeypatch)
-    r = unauthed_client.post("/auth/login", data={"username": "ghost", "password": "whatever"})
+    username = f"ghost-{uuid.uuid4().hex[:8]}"
+    _cleanup_usernames.append(username)
+    r = unauthed_client.post("/auth/login", data={"username": username, "password": "whatever"})
     assert r.status_code == 401
 
 

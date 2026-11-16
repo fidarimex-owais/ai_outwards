@@ -1,3 +1,5 @@
+import logging
+
 import httpx
 import pytest
 from google.genai import errors as genai_errors
@@ -57,13 +59,15 @@ def test_both_fail_raises_all_llms_failed():
 
 # --- error classification (which failures are eligible for fallback) ---------------------
 
-@pytest.mark.parametrize("status", [429, 500, 502, 503])
-def test_httpx_rate_limit_and_server_errors_are_retryable(status):
+@pytest.mark.parametrize("status", [400, 429, 500, 502, 503])
+def test_httpx_rate_limit_server_and_bad_request_errors_are_retryable(status):
+    # 400 is included here (Option B): a Bad Request from the primary falls back too, per
+    # _is_retryable's reasoning - only auth failures (401/403) stay non-retryable below.
     assert _is_retryable(_http_status_error(status)) is True
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404])
-def test_httpx_invalid_request_and_auth_errors_are_not_retryable(status):
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_httpx_auth_and_not_found_errors_are_not_retryable(status):
     assert _is_retryable(_http_status_error(status)) is False
 
 
@@ -71,14 +75,14 @@ def test_httpx_timeout_is_retryable():
     assert _is_retryable(httpx.TimeoutException("timed out")) is True
 
 
-@pytest.mark.parametrize("status", [429, 500, 503])
-def test_genai_rate_limit_and_server_errors_are_retryable(status):
+@pytest.mark.parametrize("status", [400, 429, 500, 503])
+def test_genai_rate_limit_server_and_bad_request_errors_are_retryable(status):
     cls = genai_errors.ClientError if status < 500 else genai_errors.ServerError
     assert _is_retryable(_genai_error(cls, status)) is True
 
 
-@pytest.mark.parametrize("status", [400, 401, 403])
-def test_genai_invalid_request_and_auth_errors_are_not_retryable(status):
+@pytest.mark.parametrize("status", [401, 403])
+def test_genai_auth_errors_are_not_retryable(status):
     assert _is_retryable(_genai_error(genai_errors.ClientError, status)) is False
 
 
@@ -111,6 +115,70 @@ def test_retryable_primary_failure_does_fall_back():
 
     chain = LLMChain(primary=RateLimitedClient(), backup=WorkingClient())
     assert chain.generate("hello") == "response-to: hello"
+
+
+# --- end-to-end through the full chain, with each provider's real exception shape --------
+# (Plan item 7 / Unit 6: Option B for a 400 from the primary, confirmed symmetric regardless
+# of which provider is primary, since _is_retryable only looks at the status code.)
+
+def test_end_to_end_groq_429_falls_back_to_gemini():
+    class RateLimitedGroq(LLMClient):
+        def generate(self, prompt, system=None):
+            raise _http_status_error(429)
+
+    chain = LLMChain(primary=RateLimitedGroq(), backup=WorkingClient(), primary_name="groq", backup_name="gemini")
+    assert chain.generate("hello") == "response-to: hello"
+
+
+def test_end_to_end_gemini_400_falls_back_to_groq(caplog):
+    class BadRequestGemini(LLMClient):
+        def generate(self, prompt, system=None):
+            raise _genai_error(genai_errors.ClientError, 400)
+
+    chain = LLMChain(primary=BadRequestGemini(), backup=WorkingClient(), primary_name="gemini", backup_name="groq")
+
+    with caplog.at_level(logging.ERROR):
+        result = chain.generate("hello", session_id="sess-400")
+
+    assert result == "response-to: hello"
+    error_lines = [r.message for r in caplog.records if r.levelno == logging.ERROR]
+    assert len(error_lines) == 1
+    assert "status=400" in error_lines[0]
+    assert "gemini" in error_lines[0] and "groq" in error_lines[0]
+    # No prompt text, no transcript, no key anywhere in the ERROR line.
+    assert "hello" not in error_lines[0]
+
+
+def test_end_to_end_gemini_401_does_not_fall_back():
+    class AuthFailingGemini(LLMClient):
+        def generate(self, prompt, system=None):
+            raise _genai_error(genai_errors.ClientError, 401)
+
+    class ExplodingGroq(LLMClient):
+        def generate(self, prompt, system=None):
+            raise AssertionError("backup should not have been called for a 401")
+
+    chain = LLMChain(primary=AuthFailingGemini(), backup=ExplodingGroq(), primary_name="gemini", backup_name="groq")
+    with pytest.raises(AllLLMsFailed):
+        chain.generate("hello", session_id="sess-401")
+
+
+def test_end_to_end_both_providers_fail_raises_all_llms_failed():
+    class ServerErrorGemini(LLMClient):
+        def generate(self, prompt, system=None):
+            raise _genai_error(genai_errors.ServerError, 503)
+
+    class ServerErrorGroq(LLMClient):
+        def generate(self, prompt, system=None):
+            raise _http_status_error(503)
+
+    chain = LLMChain(primary=ServerErrorGemini(), backup=ServerErrorGroq(), primary_name="gemini", backup_name="groq")
+    with pytest.raises(AllLLMsFailed) as exc_info:
+        chain.generate("hello", session_id="sess-both")
+    # Same detail-text contract as before Unit 6 - unchanged by the 400-fallback change.
+    message = str(exc_info.value)
+    assert "primary (gemini) failed" in message
+    assert "backup (groq) failed" in message
 
 
 # --- configurable primary provider (LLM_PRIMARY_PROVIDER) --------------------------------

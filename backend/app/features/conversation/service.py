@@ -121,6 +121,10 @@ class ConversationService:
 
         guard = check_input(raw_text)
         if not guard.allowed:
+            if guard.reason == "too_long":
+                # Distinct from the generic rejection below: tells the user what to actually
+                # do differently, rather than implying their speech just wasn't understood.
+                return self._ask_clarification(session, field_def, f"{ui_text('answer_too_long', language)} {question}")
             return self._ask_clarification(session, field_def, ui_text("sorry_not_catch", language, question=question))
 
         try:
@@ -171,7 +175,8 @@ class ConversationService:
         guard = check_input(raw_text)
         if not guard.allowed:
             save_session(self._redis, session)
-            return self._retry_batch_response(session, unanswered_fields, language)
+            message_key = "answer_too_long" if guard.reason == "too_long" else "sorry_try_again"
+            return self._retry_batch_response(session, unanswered_fields, language, message_key)
 
         field_specs = [(f.key, f.label, f.field_type, f.proper_noun, f.allowed_values) for f in unanswered_fields]
         try:
@@ -200,13 +205,17 @@ class ConversationService:
 
         return self._advance(session, current_state)
 
-    def _retry_batch_response(self, session: dict, unanswered_fields: list, language: str) -> TurnResponse:
+    def _retry_batch_response(
+        self, session: dict, unanswered_fields: list, language: str, message_key: str = "sorry_try_again"
+    ) -> TurnResponse:
         """Shared shape for 'that attempt didn't work, try again' within submit_batch_answer -
         used for both a guardrail rejection and an unparseable LLM response. Session state is
-        untouched either way: nothing was answered, so there's nothing to roll back."""
+        untouched either way: nothing was answered, so there's nothing to roll back.
+        message_key defaults to the generic "sorry_try_again" (used by the parse-failure
+        caller); the too-long guard rejection passes "answer_too_long" instead."""
         return TurnResponse(
             session_id=session["session_id"], state=session["state"], language=language,
-            clarification_prompt=ui_text("sorry_try_again", language),
+            clarification_prompt=ui_text(message_key, language),
             questions=[_question_out(f, language) for f in unanswered_fields],
             next_field_key=unanswered_fields[0].key,
             answered_field_keys=[f.key for f in get_batch(session["current_batch"]) if f.key in session["answers"]],

@@ -674,3 +674,109 @@ frontend/
 **Status:** ✅ Backend re-add fully verified (107/107 + live CORS). Frontend structurally verified (lint, build, live API contract match end-to-end) - the actual UI experience needs your browser.
 
 ---
+
+## Catch-up entry — field list, LLM config, guardrails, and test isolation (2026-11-16)
+
+Everything below happened across several sessions after Step 20 and was never logged at the
+time. This entry catches the log up to the current code rather than rewriting the steps
+above - some of what Step 12/13 and Step 7b say is no longer accurate (see the OPEN items at
+the end).
+
+**Field list is now 18 fields, not 16.** `conversation/fields.py` currently defines:
+`company_name`, `vehicle_number`, `container_number`, `brand`, `line_supervisor_name`
+(renamed from `line_mark`), `weight`, `four_hand`, `five_hand`, `six_hand`, `eight_hand`,
+`cluster`, `labor_name`, `driver_name`, `cold_storage_name`, `cold_storage_supervisor_name`,
+`vehicle_in_time`, `vehicle_out_time`, `unloading_time`. `remarks`, `vehicle_for_storage`,
+and `vehicle_receiver_name` (present in the original 16) were removed; `container_number`,
+`driver_name`, `cold_storage_name`, `cold_storage_supervisor_name`, and `unloading_time` were
+added. Questions are asked in the order In → Out → Unloading. `vehicle_in_time`/
+`vehicle_out_time` must specify AM/PM explicitly per the extraction prompt.
+
+**STT provider is now configurable, not local-only.** `speech/provider.py` has two
+implementations - `LocalWhisperSTTClient` (the original Step 7b local `faster-whisper`) and
+`GroqSTTClient` (Groq's hosted Whisper, lower latency, no local model download) - selected by
+the `STT_PROVIDER` setting (`"groq"` or `"whisper"`). Currently `groq`.
+
+**LLM provider and model are now configurable via `.env`.** Two new settings in
+`core/config.py`:
+- `LLM_PRIMARY_PROVIDER` ("gemini" or "groq") - which provider `LLMChain` tries first; the
+  other is always the automatic fallback. Defaults to "gemini" if missing/unrecognized.
+- `GEMINI_MODEL` - which Gemini model `GeminiLLMClient` calls. **Default changed from
+  `gemini-3.8-flash` to `gemini-3.1-flash-lite`.** Why: Google AI Studio's own rate-limit page
+  shows `gemini-3.8-flash` capped at 20 requests/day on the free tier, while
+  `gemini-3.1-flash-lite` allows 500/day and 15/minute. The other Lite candidate considered,
+  `gemini-3.5-flash-lite`, was probed live and returned a real `400 Bad Request` (`ClientError`)
+  under this app's exact call shape (`thinking_config=ThinkingConfig(thinking_budget=0)`), so
+  it was not used.
+- `GeminiLLMClient.generate()` also now logs per-call usage (`GEMINI_USAGE`: model, token
+  counts, elapsed time, or the error type/status on failure) at INFO/WARNING, and
+  `app/main.py` now calls `logging.basicConfig()` so these lines actually print (uvicorn's own
+  logging config has no `"root"` entry, so without this they were silently capped at WARNING).
+
+**`LLMChain`'s fallback rule changed for a `400` from the primary.** Previously only
+429/5xx/timeout fell back to the backup provider; a `400` (`INVALID_ARGUMENT`) was treated as
+non-retryable (same as 401/403) and failed the whole turn. Now a `400` from the primary also
+falls back to the backup - in practice, a `400` here has meant the primary is misconfigured
+(e.g. an invalid model id) rather than a per-request problem, so falling back keeps the
+user's turn working. This is logged at ERROR (not WARNING) every time it happens, naming the
+status code and both provider names only - never the prompt, transcript, or any key - since
+it trades reliability now for the risk of masking a broken primary later. `401`/`403` are
+unaffected and still do not fall back.
+
+**Input guardrail cap raised, twice, and is now message-specific.** `input_guard.py`'s
+`MAX_LENGTH` went 500 → 1000 → **1500**, derived from a real 555-character 18-field English
+test answer plus headroom, times an assumed (unmeasured) 1.3-1.5x margin for Devanagari
+script. A guard rejection for `reason == "too_long"` now shows a distinct message ("Your
+answer is too long. Please give a shorter answer or split it into a few parts.", translated)
+instead of the generic "Sorry, I didn't catch that" text used for `"empty"` - the
+`"prompt_injection"` reason still shows the generic message too, deliberately, so the filter's
+existence is never revealed to the user.
+
+**`/speech/transcribe` now caps uploads at 10 MB**, read in capped 1 MB chunks (not one
+`.read()` call), rejecting with `413` - see the OPEN item below on this cap's real limit.
+
+**`validate_text()` now rejects list/dict values instead of silently stringifying them** (a
+malformed LLM response for a free-text field used to be stored as corrupted text like
+`"['Ravi']"` with no error).
+
+**Test isolation fixes:** the one test that made a real external call
+(`test_transcribe_runs_the_real_pipeline`) is now split into a default fake-STT version and a
+`@pytest.mark.live`-marked real version, excluded from a plain `pytest -q` run (`pytest.ini`'s
+`addopts = -m "not live"`). Run the live one on purpose with:
+```
+python -m pytest -m live -q
+```
+Two `test_auth.py` tests (`test_login_wrong_password_rejected`,
+`test_login_unknown_user_rejected`) used fixed usernames with no cleanup, letting their
+failed-login counts accumulate in real Redis across repeated `pytest` runs until the rate
+limiter tripped for real; both now use a uuid-based unique username and clean up their
+`login_attempts:*:<username>` Redis key via a fixture teardown.
+
+**Current test count: 135 collected, 134 run + passing, 1 deselected (the live test).**
+
+**OPEN items, stated honestly:**
+- **JWT_SECRET enforcement deferred by the user.** The placeholder default
+  (`change-me-to-a-long-random-string`) is still in use and nothing refuses to start on it.
+  **Do not deploy or expose this backend until this is fixed.**
+- **`unloading_time` has no sequence validation** against `vehicle_in_time`/`vehicle_out_time`
+  - waiting on the user's confirmed business rule before writing it.
+- **The upload cap only limits processing, not receipt.** `UploadFile` is already fully
+  parsed by FastAPI/Starlette before the route handler runs, so the 10 MB chunked-read cap
+  protects against this app's own code building a giant buffer, but not against receiving an
+  oversized body in the first place. Real protection needs a proxy-level limit (e.g. nginx's
+  `client_max_body_size`) or an ASGI middleware that counts bytes while streaming.
+- **The Hindi/Marathi multiplier behind the 1500-character cap is unmeasured** - it's an
+  assumed 1.3-1.5x margin for Devanagari script, not measured against this app's own
+  Hindi/Marathi usage. Re-derive it once a real multi-field Devanagari submission has been
+  captured and measured.
+- **A per-session/per-day call-count cooldown feature (to reduce LLM quota usage further)
+  has not been built.** This was discussed as a possible future step but no code exists for
+  it.
+
+Everything above was run against the real local Redis/MongoDB, as with every other step in
+this log; LLM/STT calls in the automated suite are faked except the one `@pytest.mark.live`
+test. UNVERIFIED: whether any currently-deployed instance of this app (if one exists outside
+this development environment) is still running the pre-change defaults - that's outside what
+this log or this session's testing can see.
+
+---

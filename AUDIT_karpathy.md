@@ -4,6 +4,8 @@
 
 **OPEN: Upload cap only limits processing, not receipt: UploadFile is already parsed before the handler runs. Real protection needs a proxy limit (e.g. client_max_body_size) or an ASGI middleware that counts bytes while streaming.**
 
+**FIXED (Unit 6b): `tests/test_auth.py::test_login_unknown_user_rejected` used a hardcoded username ("ghost") with no cleanup, so its failed-login count in real Redis accumulated across repeated `pytest` runs until the rate limiter tripped for real (not a bug in the limiter itself - it was doing exactly what it's supposed to). Also found and fixed the same gap in `test_login_wrong_password_rejected` (fixed default username "pytest-operator", no cleanup). Fix: `_set_test_operator()` now generates a unique username per call (uuid-based) instead of a fixed literal, and both tests clean up their `login_attempts:*:<username>` Redis key via a new `_cleanup_usernames` fixture teardown. Verified stable across 2 consecutive full-suite runs (126 passed, 1 deselected, both times).**
+
 Scope: `backend/app/`, `backend/tests/`, `frontend/src/`. No files changed. No live Gemini/Groq calls made.
 
 Baseline held while auditing: backend 116/117 pytest (1 pre-existing env-dependent failure, see GOAL-DRIVEN #1 below), frontend 15/15 vitest, lint clean, build clean.
